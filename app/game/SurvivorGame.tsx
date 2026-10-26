@@ -474,7 +474,7 @@ export default function SurvivorGame() {
   const [saveData, setSaveData] = useState<MetaSaveData>(() => loadSaveData());
 
   const [screen, setScreen] = useState<"menu" | "playing">("menu");
-  const [menuTab, setMenuTab] = useState<"deploy" | "altar" | "grimoire">("deploy");
+  const [menuTab, setMenuTab] = useState<"deploy" | "altar" | "grimoire" | "about">("deploy");
   const [muted, setMuted] = useState(false);
   const [musicVol, setMusicVol] = useState(70); // 0..100
   const [sfxVol, setSfxVol] = useState(80); // 0..100
@@ -502,6 +502,7 @@ export default function SurvivorGame() {
   const [levelUpChoices, setLevelUpChoices] = useState<UpgradeChoiceCard[] | null>(null);
   const [chestReward, setChestReward] = useState<BossChestReward | null>(null);
   const [pauseModalOpen, setPauseModalOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [endModal, setEndModal] = useState<{
     outcome: "victory" | "defeat";
     elapsedSec: number;
@@ -3425,141 +3426,191 @@ export default function SurvivorGame() {
 
           <div className="relative mx-auto max-w-6xl">
             {/* Ornate Gothic Sanctum Header Frame */}
-            <header className="relative overflow-hidden rounded-2xl border border-[#D4AF37]/35 bg-[#120F1A]/85 p-5 shadow-[0_16px_45px_rgba(0,0,0,0.75)] backdrop-blur-md sm:p-7">
+            <header className="relative overflow-hidden rounded-2xl border border-[#D4AF37]/35 bg-[#120F1A]/85 shadow-[0_16px_45px_rgba(0,0,0,0.75)] backdrop-blur-md">
               {/* Top & Bottom Ornamental Gold Hairlines */}
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#D4AF37]/70 to-transparent" />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[#C92A3E]/50 to-transparent" />
 
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-4 p-5 sm:p-6 lg:flex-row lg:items-start lg:justify-between">
                 <div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-[#D4AF37]/50 bg-[#1D1626]/90 px-3.5 py-1 text-[11px] font-bold tracking-[0.18em] text-[#F3C65F] uppercase shadow-inner">
-                    <span>✦</span>
-                    <span>Catacomb Sanctum • Dark Fantasy Roguelike</span>
-                    <span>✦</span>
-                  </div>
-                  <h1 className="mt-2.5 bg-gradient-to-b from-[#FFFDF9] via-[#F3E3B8] to-[#C89D3C] bg-clip-text font-serif text-3xl font-black tracking-wider text-transparent uppercase drop-shadow-[0_4px_16px_rgba(212,175,55,0.28)] sm:text-5xl">
-                    Grim Survivors
-                  </h1>
-                  <p className="mt-1.5 max-w-xl text-xs sm:text-sm text-[#BDB8AD]">
-                    Survive 5 minutes inside the Cursed Courtyard, awaken{" "}
-                    <span className="font-semibold text-[#FCA5A5]">Red-Star Evolutions (★)</span>, and vanquish Malphas.
-                  </p>
-                </div>
-
-                {/* Gold & Career Stats Reliquary */}
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-3 rounded-xl border border-[#D4AF37]/55 bg-[#0B0910]/90 px-4 py-2.5 shadow-[inset_0_0_18px_rgba(212,175,55,0.12)]">
+                  <h1>
+                    <span className="sr-only">Sovereign Survivors</span>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={PICKUP_ICON_URLS.gold}
-                      alt="Sovereign Gold"
-                      className="h-6 w-6 shrink-0 object-contain [image-rendering:pixelated]"
+                      src="/logo/logo.png"
+                      alt="Sovereign Survivors"
+                      className="h-24 w-auto object-contain [image-rendering:pixelated] drop-shadow-[0_6px_20px_rgba(212,175,55,0.32)] sm:h-28"
                     />
-                    <div>
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-[#A39E93]">
-                        Sovereign Gold
+                  </h1>
+                </div>
+
+                {/* Gold, Best Record & Simple Audio Bar (Single Horizontal Row, Top-Aligned) */}
+                <div className="flex flex-row flex-wrap items-stretch gap-2.5 sm:flex-nowrap">
+                  {/* Unified Gold & Best Record Reliquary */}
+                  <div className="flex flex-row items-center divide-x divide-[#282238] rounded-xl border border-[#D4AF37]/40 bg-[#0B0910]/95 shadow-[0_8px_24px_rgba(0,0,0,0.55),inset_0_0_16px_rgba(212,175,55,0.08)]">
+                    {/* Gold Balance */}
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={PICKUP_ICON_URLS.gold}
+                        alt="Gold"
+                        className="h-5 w-5 shrink-0 object-contain [image-rendering:pixelated]"
+                      />
+                      <div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#A39E93]">
+                          Gold
+                        </div>
+                        <div className="font-mono text-sm font-black leading-tight text-[#F3C65F]">
+                          {saveData.gold.toLocaleString()}
+                          <span className="ml-0.5 text-[11px] font-bold text-[#D4AF37]">G</span>
+                        </div>
                       </div>
-                      <div className="font-mono text-lg font-black text-[#F3C65F]">
-                        {saveData.gold.toLocaleString()} G
+                    </div>
+
+                    {/* Best Survival Time */}
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[#38BDF8]/30 bg-[#101C29] text-[11px] text-[#7DD3FC]">
+                        ⏱
+                      </div>
+                      <div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#A39E93]">
+                          Best
+                        </div>
+                        <div className="font-mono text-sm font-black leading-tight text-[#EAE6DF]">
+                          {formatTime(saveData.bestTimeSec)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Total Slain */}
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={PASSIVE_ICON_URLS.spinach}
+                        alt="Slain"
+                        className="h-5 w-5 shrink-0 object-contain [image-rendering:pixelated]"
+                      />
+                      <div>
+                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#A39E93]">
+                          Slain
+                        </div>
+                        <div className="font-mono text-sm font-black leading-tight text-[#FCA5A5]">
+                          {saveData.totalKills.toLocaleString()}
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-[#352E47] bg-[#0B0910]/90 px-4 py-2.5">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#A39E93]">
-                      Best Survival / Slain
-                    </div>
-                    <div className="font-mono text-sm font-bold text-[#EAE6DF]">
-                      {formatTime(saveData.bestTimeSec)} • {saveData.totalKills.toLocaleString()} Kills
-                    </div>
-                  </div>
-
-                  {/* Dual Volume Mixer: Music & SFX */}
-                  <div className="flex items-center gap-3 rounded-xl border border-[#352E47] bg-[#0B0910]/90 px-3.5 py-2 shadow-inner">
-                    <button
-                      onClick={toggleMute}
-                      title={muted ? "Unmute All Audio" : "Mute All Audio"}
-                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border text-xs transition ${
-                        muted
-                          ? "border-[#EF4444]/50 bg-[#1F0B10] text-[#FCA5A5] hover:border-[#EF4444]"
-                          : "border-[#D4AF37]/45 bg-[#161222] text-[#F3C65F] hover:border-[#D4AF37]"
-                      }`}
-                    >
-                      {muted ? "🔇" : "🔊"}
-                    </button>
-
-                    <div className="flex flex-col gap-1.5 min-w-[148px]">
-                      <label className="flex items-center justify-between gap-2 text-[10px] font-mono">
-                        <span className="font-bold uppercase tracking-wider text-[#BAE6FD]">
-                          🎵 Music
-                        </span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={muted ? 0 : musicVol}
-                          onChange={(e) => handleMusicVolChange(Number(e.target.value))}
-                          className="h-1.5 w-20 cursor-pointer accent-[#38BDF8]"
-                        />
-                        <span className="w-7 text-right font-bold text-[#EAE6DF]">
-                          {muted ? 0 : musicVol}%
-                        </span>
-                      </label>
-
-                      <label className="flex items-center justify-between gap-2 text-[10px] font-mono">
-                        <span className="font-bold uppercase tracking-wider text-[#F3C65F]">
-                          ⚔️ SFX
-                        </span>
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={muted ? 0 : sfxVol}
-                          onChange={(e) => handleSfxVolChange(Number(e.target.value))}
-                          className="h-1.5 w-20 cursor-pointer accent-[#F3C65F]"
-                        />
-                        <span className="w-7 text-right font-bold text-[#EAE6DF]">
-                          {muted ? 0 : sfxVol}%
-                        </span>
-                      </label>
-                    </div>
-                  </div>
+                  {/* Settings Dialog Trigger Button */}
+                  <button
+                    onClick={() => setSettingsModalOpen(true)}
+                    title="Open Settings"
+                    className="flex flex-row items-center gap-2 rounded-xl border border-[#D4AF37]/40 bg-[#0B0910]/95 px-3.5 py-2.5 text-xs font-bold text-[#EAE6DF] shadow-[0_8px_24px_rgba(0,0,0,0.55)] transition hover:border-[#F3C65F] hover:bg-[#171222] hover:text-white"
+                  >
+                    <span className="text-sm">{muted ? "🔇" : "⚙️"}</span>
+                    <span className="font-serif uppercase tracking-wider text-[#F3C65F]">
+                      Settings
+                    </span>
+                  </button>
                 </div>
               </div>
 
-              {/* Navigation Tabs inside Sanctum Header */}
-              <div className="mt-6 flex flex-wrap gap-2.5 border-t border-[#2A2438] pt-5">
-                <button
-                  onClick={() => setMenuTab("deploy")}
-                  className={`rounded-xl px-5 py-2.5 text-sm font-bold tracking-wide transition ${
-                    menuTab === "deploy"
-                      ? "border border-[#F87171]/60 bg-gradient-to-b from-[#DC2626] to-[#991B1B] text-white shadow-[0_0_24px_rgba(201,42,62,0.5)]"
-                      : "border border-[#2E283D] bg-[#0B0910]/80 text-[#A39E93] hover:border-[#D4AF37]/40 hover:text-white"
-                  }`}
-                >
-                  ⚔️ Champions & Deploy
-                </button>
-                <button
-                  onClick={() => setMenuTab("altar")}
-                  className={`rounded-xl px-5 py-2.5 text-sm font-bold tracking-wide transition ${
-                    menuTab === "altar"
-                      ? "border border-[#FDE047]/70 bg-gradient-to-b from-[#F3C65F] to-[#B48222] text-[#0B0A0E] shadow-[0_0_24px_rgba(212,175,55,0.45)]"
-                      : "border border-[#2E283D] bg-[#0B0910]/80 text-[#A39E93] hover:border-[#D4AF37]/40 hover:text-white"
-                  }`}
-                >
-                  🏛️ Altar of Power (Shop)
-                </button>
-                <button
-                  onClick={() => setMenuTab("grimoire")}
-                  className={`rounded-xl px-5 py-2.5 text-sm font-bold tracking-wide transition ${
-                    menuTab === "grimoire"
-                      ? "border border-[#7DD3FC]/70 bg-gradient-to-b from-[#38BDF8] to-[#0284C7] text-[#0B0A0E] shadow-[0_0_24px_rgba(56,189,248,0.45)]"
-                      : "border border-[#2E283D] bg-[#0B0910]/80 text-[#A39E93] hover:border-[#D4AF37]/40 hover:text-white"
-                  }`}
-                >
-                  📖 Grimoire (EVO Recipes ★)
-                </button>
-              </div>
+              {/* Navigation Tabs inside Sanctum Header (Flush Edge-to-Edge) */}
+              <nav className="grid grid-cols-2 divide-x divide-y divide-[#231D30] border-t border-[#282138] bg-[#08060D]/95 sm:grid-cols-4 sm:divide-y-0">
+                {[
+                  {
+                    id: "deploy" as const,
+                    label: "Champions",
+                    sub: "Select & Deploy",
+                    icon: WEAPON_ICON_URLS.bible,
+                    accent: "from-[#C92A3E]/30 via-[#25121C] to-[#120D18]",
+                    barColor: "from-transparent via-[#EF4444] to-transparent",
+                    textActive: "text-[#FECACA]",
+                  },
+                  {
+                    id: "altar" as const,
+                    label: "Altar of Power",
+                    sub: "Permanent Shop",
+                    icon: PICKUP_ICON_URLS.gold,
+                    accent: "from-[#D4AF37]/25 via-[#241D14] to-[#120E16]",
+                    barColor: "from-transparent via-[#F3C65F] to-transparent",
+                    textActive: "text-[#FDE68A]",
+                  },
+                  {
+                    id: "grimoire" as const,
+                    label: "Grimoire",
+                    sub: "EVO Recipes ★",
+                    icon: RUNIC_ICON_URL,
+                    accent: "from-[#38BDF8]/25 via-[#11202E] to-[#100D18]",
+                    barColor: "from-transparent via-[#38BDF8] to-transparent",
+                    textActive: "text-[#BAE6FD]",
+                  },
+                  {
+                    id: "about" as const,
+                    label: "About Game",
+                    sub: "Lore & Features",
+                    icon: PASSIVE_ICON_URLS.tome,
+                    accent: "from-[#A855F7]/25 via-[#1E142B] to-[#100D18]",
+                    barColor: "from-transparent via-[#C084FC] to-transparent",
+                    textActive: "text-[#E9D5FF]",
+                  },
+                ].map((tab) => {
+                  const active = menuTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        soundFX.playXpGem();
+                        setMenuTab(tab.id);
+                      }}
+                      className={`group relative flex items-center gap-3 overflow-hidden px-4 py-3 text-left transition-all ${
+                        active
+                          ? `bg-gradient-to-b ${tab.accent}`
+                          : "bg-transparent text-[#A39E93] hover:bg-[#14101E]/90 hover:text-[#EAE6DF]"
+                      }`}
+                    >
+                      {/* Active Bottom Glow Line */}
+                      {active && (
+                        <div
+                          className={`pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-gradient-to-r ${tab.barColor}`}
+                        />
+                      )}
+
+                      {/* Pixel-Art Relic Emblem */}
+                      <div
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition ${
+                          active
+                            ? "border-[#D4AF37]/50 bg-[#0B0910] shadow-inner"
+                            : "border-[#251F33] bg-[#0E0B15] group-hover:border-[#3A3150]"
+                        }`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={tab.icon}
+                          alt={tab.label}
+                          className={`h-5 w-5 object-contain [image-rendering:pixelated] transition-transform duration-150 ${
+                            active ? "scale-110" : " opacity-80 group-hover:scale-105 group-hover:opacity-100"
+                          }`}
+                        />
+                      </div>
+
+                      {/* Tab Title & Subtitle */}
+                      <div className="min-w-0 flex-1">
+                        <div
+                          className={`truncate font-serif text-xs font-black uppercase tracking-wider sm:text-sm ${
+                            active ? tab.textActive : "text-[#EAE6DF]"
+                          }`}
+                        >
+                          {tab.label}
+                        </div>
+                        <div className="truncate font-mono text-[10px] text-[#8E889C]">
+                          {tab.sub}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </nav>
             </header>
 
             {/* TAB 1: CHARACTER SELECT & DEPLOY */}
@@ -4067,6 +4118,339 @@ export default function SurvivorGame() {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: ABOUT & GAME FEATURES */}
+            {menuTab === "about" && (
+              <div className="mt-6 space-y-5">
+                {/* Hero Overview Card */}
+                <div className="relative overflow-hidden rounded-2xl border border-[#D4AF37]/40 bg-[#120F1A]/90 p-6 shadow-2xl backdrop-blur-md">
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#D4AF37]/70 to-transparent" />
+                  <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+                    <div className="max-w-3xl">
+                      <span className="inline-block rounded-md border border-[#C084FC]/40 bg-[#231536] px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-[#E9D5FF]">
+                        ✦ Dark Fantasy Action-Roguelike
+                      </span>
+                      <h2 className="mt-2 font-serif text-2xl font-black uppercase tracking-wide text-[#FFFDF9] sm:text-3xl">
+                        About Sovereign Survivors
+                      </h2>
+                      <p className="mt-2 text-sm leading-relaxed text-[#BDB8AD]">
+                        <strong className="text-[#F3C65F]">Sovereign Survivors</strong> is a fast-paced{" "}
+                        <em>Dark Fantasy Horde-Survival Roguelike</em> where you stand against relentless waves of the
+                        undead inside the <strong>Cursed Courtyard</strong>. Survive for{" "}
+                        <span className="font-bold text-[#EAE6DF]">5 minutes</span>, awaken supreme{" "}
+                        <span className="font-bold text-[#FCA5A5]">Red-Star Weapon Evolutions (★)</span>, and vanquish{" "}
+                        <strong>Malphas, Arch-Demon of Ash</strong>—or push beyond victory into{" "}
+                        <span className="font-bold text-[#E9D5FF]">Endless Overtime Mode</span> to test your limits.
+                      </p>
+                    </div>
+
+                    <div className="flex shrink-0 items-center justify-center rounded-2xl border border-[#2E283D] bg-[#0B0910]/90 p-4">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src="/logo/logo.png"
+                        alt="Sovereign Survivors"
+                        className="h-24 w-auto object-contain [image-rendering:pixelated]"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Key Features Grid (6 Cards) */}
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {/* Feature 1: 4 Playable Champions */}
+                  <div className="rounded-2xl border border-[#2E283D] bg-[#120F1A]/85 p-5 shadow-lg backdrop-blur-md">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#D4AF37]/45 bg-[#1B1526]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={WEAPON_ICON_URLS.bible}
+                          alt="Champions"
+                          className="h-7 w-7 object-contain [image-rendering:pixelated]"
+                        />
+                      </div>
+                      <div>
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#F3C65F]">
+                          4 Playable Classes
+                        </span>
+                        <h3 className="font-serif text-base font-black text-[#FFFDF9]">
+                          Distinct Champion Playstyles
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-xs leading-relaxed text-[#A39E93]">
+                      Choose from 4 unique Champions: <strong className="text-[#EAE6DF]">Sir Roland</strong> (Paladin
+                      with high Armor &amp; Greatsword), <strong className="text-[#EAE6DF]">Lyra</strong> (Pyromancer
+                      with rapid Cooldowns), <strong className="text-[#EAE6DF]">Vaelen</strong> (Rogue with lethal Speed
+                      &amp; Criticals), or <strong className="text-[#EAE6DF]">Malakor</strong> (Necromancer with wide
+                      Area &amp; Magnet reach).
+                    </p>
+                  </div>
+
+                  {/* Feature 2: Red-Star Weapon Evolutions */}
+                  <div className="rounded-2xl border border-[#2E283D] bg-[#120F1A]/85 p-5 shadow-lg backdrop-blur-md">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#EF4444]/55 bg-[#261016]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={WEAPON_EVO_ICON_URLS.bible}
+                          alt="Red-Star Evolution"
+                          className="h-7 w-7 object-contain [image-rendering:pixelated]"
+                        />
+                      </div>
+                      <div>
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#FCA5A5]">
+                          Red-Star Evolution ★
+                        </span>
+                        <h3 className="font-serif text-base font-black text-[#FFFDF9]">
+                          6 Supreme Weapon Evolutions
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-xs leading-relaxed text-[#A39E93]">
+                      Master any active weapon to <strong className="text-[#F3C65F]">Level 5</strong> and pair it with
+                      its matching <strong className="text-[#7DD3FC]">Runic Relic (Lv.1+)</strong> to awaken its{" "}
+                      <strong className="text-[#FCA5A5]">Level 6 Red-Star Evolution (★)</strong> via Level-Up drafts or
+                      Boss Treasure Chests.
+                    </p>
+                  </div>
+
+                  {/* Feature 3: Boss Timeline & Arena Fights */}
+                  <div className="rounded-2xl border border-[#2E283D] bg-[#120F1A]/85 p-5 shadow-lg backdrop-blur-md">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#F87171]/45 bg-[#201218]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={PASSIVE_ICON_URLS.spinach}
+                          alt="Boss Encounters"
+                          className="h-7 w-7 object-contain [image-rendering:pixelated]"
+                        />
+                      </div>
+                      <div>
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#F87171]">
+                          3-Stage Boss Timeline
+                        </span>
+                        <h3 className="font-serif text-base font-black text-[#FFFDF9]">
+                          Cursed Arena Boss Encounters
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-xs leading-relaxed text-[#A39E93]">
+                      Confront 3 major Bosses: <strong className="text-[#EAE6DF]">Bone Goliath (01:30)</strong>,{" "}
+                      <strong className="text-[#EAE6DF]">Dread Necromancer (03:00)</strong>, and{" "}
+                      <strong className="text-[#FCA5A5]">Malphas, Arch-Demon of Ash (05:00)</strong> inside a Cursed
+                      Arena Barrier complete with telegraphed hazards and intense boss music.
+                    </p>
+                  </div>
+
+                  {/* Feature 4: Altar of Power Meta-Progression */}
+                  <div className="rounded-2xl border border-[#2E283D] bg-[#120F1A]/85 p-5 shadow-lg backdrop-blur-md">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#D4AF37]/45 bg-[#1E1810]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={PICKUP_ICON_URLS.gold}
+                          alt="Altar of Power"
+                          className="h-7 w-7 object-contain [image-rendering:pixelated]"
+                        />
+                      </div>
+                      <div>
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#F3C65F]">
+                          Permanent Progression
+                        </span>
+                        <h3 className="font-serif text-base font-black text-[#FFFDF9]">
+                          Altar of Power &amp; Full Respec
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-xs leading-relaxed text-[#A39E93]">
+                      Gather <strong className="text-[#F3C65F]">Sovereign Gold</strong> across runs to unlock permanent
+                      stat blessings (<em>Might, Vitality, Swiftness, Arcane Haste, Magnet, Greed</em>), with a{" "}
+                      <strong>100% Gold Refund</strong> available whenever you want to respec.
+                    </p>
+                  </div>
+
+                  {/* Feature 5: Spectral Dash & Combat Pickups */}
+                  <div className="rounded-2xl border border-[#2E283D] bg-[#120F1A]/85 p-5 shadow-lg backdrop-blur-md">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#38BDF8]/45 bg-[#0F1E2A]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={PICKUP_ICON_URLS.rosary}
+                          alt="Relic Pickups"
+                          className="h-7 w-7 object-contain [image-rendering:pixelated]"
+                        />
+                      </div>
+                      <div>
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#7DD3FC]">
+                          Tactical Combat
+                        </span>
+                        <h3 className="font-serif text-base font-black text-[#FFFDF9]">
+                          Spectral Dash &amp; Relic Drops
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-xs leading-relaxed text-[#A39E93]">
+                      Trigger <strong>Spectral Dash</strong> for brief invulnerability to phase through deadly swarms,
+                      and seize battlefield drops: <strong>Roasted Meat</strong> (restore HP),{" "}
+                      <strong>Lodestone Magnet</strong> (vacuum all XP gems), and <strong>Sanctified Rosary</strong>{" "}
+                      (smite nearby foes).
+                    </p>
+                  </div>
+
+                  {/* Feature 6: Dynamic Audio & Controls */}
+                  <div className="rounded-2xl border border-[#2E283D] bg-[#120F1A]/85 p-5 shadow-lg backdrop-blur-md">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[#C084FC]/45 bg-[#1F142B]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={PASSIVE_ICON_URLS.tome}
+                          alt="Controls & Audio"
+                          className="h-7 w-7 object-contain [image-rendering:pixelated]"
+                        />
+                      </div>
+                      <div>
+                        <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#E9D5FF]">
+                          Controls &amp; Sound
+                        </span>
+                        <h3 className="font-serif text-base font-black text-[#FFFDF9]">
+                          Responsive Controls &amp; BGM
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-xs leading-relaxed text-[#A39E93]">
+                      Move seamlessly with <strong className="text-[#EAE6DF]">WASD / Arrow Keys</strong> or{" "}
+                      <strong className="text-[#EAE6DF]">Mouse Drag / Touch Joystick</strong>, press{" "}
+                      <strong className="text-[#7DD3FC]">Space / Shift</strong> to Dash, and{" "}
+                      <strong className="text-[#F3C65F]">ESC / P</strong> to Pause—backed by dynamic procedural tracks
+                      for Menu, Battle, and Boss phases.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Ornate Sanctum Homepage Footer */}
+            <footer className="relative mt-8 overflow-hidden rounded-2xl border border-[#D4AF37]/30 bg-[#120F1A]/85 px-5 py-4 text-center shadow-[0_12px_32px_rgba(0,0,0,0.65)] backdrop-blur-md">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-[#D4AF37]/60 to-transparent" />
+              <div className="flex flex-col items-center justify-between gap-2 text-xs text-[#A39E93] sm:flex-row">
+                <div className="flex items-center gap-2 font-serif tracking-wider text-[#BDB8AD] uppercase">
+                  <span className="text-[#D4AF37]">✦</span>
+                  <span>Sovereign Survivors</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span>Dibuat oleh</span>
+                  <a
+                    href="https://kplevi.vercel.app/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg border border-[#D4AF37]/45 bg-[#1D1626]/90 px-2.5 py-1 font-mono text-xs font-bold text-[#F3C65F] transition hover:border-[#F3C65F] hover:bg-[#271D35] hover:text-[#FFFDF9] hover:shadow-[0_0_14px_rgba(212,175,55,0.35)]"
+                  >
+                    <span>kplevi.dev</span>
+                    <span className="text-[10px]">↗</span>
+                  </a>
+                </div>
+              </div>
+            </footer>
+
+            {/* Settings Dialog Modal */}
+            {settingsModalOpen && (
+              <div
+                onClick={() => setSettingsModalOpen(false)}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+              >
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="relative w-full max-w-md overflow-hidden rounded-2xl border border-[#D4AF37]/50 bg-gradient-to-b from-[#171224] via-[#110D1A] to-[#0B0910] p-6 shadow-[0_24px_64px_rgba(0,0,0,0.9),0_0_30px_rgba(212,175,55,0.18)]"
+                >
+                  {/* Top Ornamental Gold Line */}
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#F3C65F] to-transparent" />
+
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between border-b border-[#2A233A] pb-4">
+                    <div>
+                      <span className="block font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-[#D4AF37]">
+                        ✦ System Configuration
+                      </span>
+                      <h2 className="mt-0.5 font-serif text-xl font-black uppercase tracking-wider text-[#FFFDF9]">
+                        Game Settings
+                      </h2>
+                    </div>
+                    <button
+                      onClick={() => setSettingsModalOpen(false)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#352C47] bg-[#161222] text-xs font-bold text-[#A39E93] transition hover:border-[#F87171] hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  {/* Audio Settings Section */}
+                  <div className="mt-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="font-serif text-xs font-bold uppercase tracking-widest text-[#F3C65F]">
+                        Audio & Sound Mixer
+                      </span>
+                      <button
+                        onClick={toggleMute}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1 text-xs font-bold transition ${
+                          muted
+                            ? "border-[#EF4444]/60 bg-[#260D14] text-[#FCA5A5] hover:border-[#EF4444]"
+                            : "border-[#D4AF37]/45 bg-[#1B1528] text-[#F3C65F] hover:border-[#F3C65F]"
+                        }`}
+                      >
+                        <span>{muted ? "🔇" : "🔊"}</span>
+                        <span>{muted ? "Muted (Click to Unmute)" : "Master Audio On"}</span>
+                      </button>
+                    </div>
+
+                    {/* Music (BGM) Slider Box */}
+                    <div className="rounded-xl border border-[#2A233B] bg-[#0B0910]/90 p-3.5">
+                      <div className="mb-2 flex items-center justify-between text-xs">
+                        <span className="font-bold text-[#BAE6FD]">🎵 Music Volume (BGM)</span>
+                        <span className="rounded bg-[#112233] px-2 py-0.5 font-mono text-xs font-black text-[#38BDF8]">
+                          {muted ? 0 : musicVol}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={muted ? 0 : musicVol}
+                        onChange={(e) => handleMusicVolChange(Number(e.target.value))}
+                        className="h-2 w-full cursor-pointer accent-[#38BDF8]"
+                      />
+                    </div>
+
+                    {/* Sound Effects (SFX) Slider Box */}
+                    <div className="rounded-xl border border-[#2A233B] bg-[#0B0910]/90 p-3.5">
+                      <div className="mb-2 flex items-center justify-between text-xs">
+                        <span className="font-bold text-[#FDE68A]">⚔️ Sound Effects (SFX)</span>
+                        <span className="rounded bg-[#241C10] px-2 py-0.5 font-mono text-xs font-black text-[#F3C65F]">
+                          {muted ? 0 : sfxVol}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={muted ? 0 : sfxVol}
+                        onChange={(e) => handleSfxVolChange(Number(e.target.value))}
+                        className="h-2 w-full cursor-pointer accent-[#F3C65F]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="mt-6 flex justify-end border-t border-[#2A233A] pt-4">
+                    <button
+                      onClick={() => setSettingsModalOpen(false)}
+                      className="rounded-xl border border-[#D4AF37]/60 bg-gradient-to-b from-[#F3C65F] to-[#B48222] px-5 py-2 font-serif text-xs font-black uppercase tracking-wider text-[#0B0A0E] shadow-[0_0_20px_rgba(212,175,55,0.35)] transition hover:brightness-110"
+                    >
+                      Done
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

@@ -19,7 +19,7 @@ const cinzelSerif = Cinzel({
 });
 
 export const metadata: Metadata = {
-  title: "Grim Survivors — Dark Fantasy Roguelike Survival",
+  title: "Sovereign Survivors — Dark Fantasy Roguelike Survival",
   description:
     "Fast-paced Dark Fantasy Horde Survival Roguelike with Red-Star Weapon Evolutions, Arena Boss Fights, and Altar Progression.",
 };
