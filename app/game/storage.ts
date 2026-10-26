@@ -18,6 +18,12 @@ export function getDefaultSaveData(): MetaSaveData {
       magnet: 0,
       cooldown: 0,
       greed: 0,
+      armor: 0,
+      regen: 0,
+      crit: 0,
+      area: 0,
+      dash: 0,
+      revival: 0,
     },
   };
 }

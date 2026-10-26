@@ -22,7 +22,13 @@ export type MetaUpgradeId =
   | "moveSpeed"
   | "magnet"
   | "cooldown"
-  | "greed";
+  | "greed"
+  | "armor"
+  | "regen"
+  | "crit"
+  | "area"
+  | "dash"
+  | "revival";
 
 export interface CharacterDef {
   id: CharacterId;

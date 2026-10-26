@@ -79,6 +79,7 @@ interface EngineState {
   maxHp: number;
   invulnTimer: number;
   hurtFlashTimer: number;
+  revivalsLeft: number;
 
   xp: number;
   xpToNext: number;
@@ -726,7 +727,10 @@ export default function SurvivorGame() {
           (1 - pTome * 0.08)
       );
 
-      const areaMul = charDef.bonuses.areaMul * (1 + pSpellbinder * 0.12);
+      const areaMul =
+        charDef.bonuses.areaMul *
+        (1 + (meta.upgrades.area || 0) * 0.05) *
+        (1 + pSpellbinder * 0.12);
 
       const magnetRadius =
         95 *
@@ -735,15 +739,26 @@ export default function SurvivorGame() {
 
       const critChance = Math.min(
         0.75,
-        charDef.bonuses.critBonus + pDuplicator * 0.08
+        charDef.bonuses.critBonus +
+          (meta.upgrades.crit || 0) * 0.03 +
+          pDuplicator * 0.05
       );
+      const critDamageMul = 1.85 + (meta.upgrades.crit || 0) * 0.08;
 
-      const bonusProjCount = (pDuplicator >= 2 ? 1 : 0) + (pDuplicator >= 5 ? 1 : 0);
+      const bonusProjCount = pDuplicator >= 4 ? 1 : 0;
 
-      const regenPerSec = charDef.bonuses.regenPerSec + pPummarola * 0.6;
-      const armor = charDef.bonuses.armorBonus + Math.floor(meta.upgrades.maxHp / 3);
+      const regenPerSec =
+        charDef.bonuses.regenPerSec +
+        (meta.upgrades.regen || 0) * 0.25 +
+        pPummarola * 0.4;
+      const armor =
+        charDef.bonuses.armorBonus +
+        (meta.upgrades.armor || 0) +
+        Math.floor(meta.upgrades.maxHp / 3);
       const greedGoldMul = 1 + meta.upgrades.greed * 0.1;
       const greedXpMul = 1 + meta.upgrades.greed * 0.05;
+      const dashCdMul = Math.max(0.4, 1 - (meta.upgrades.dash || 0) * 0.07);
+      const dashDistMul = 1 + (meta.upgrades.dash || 0) * 0.06;
 
       return {
         mightMul,
@@ -754,11 +769,14 @@ export default function SurvivorGame() {
         areaMul,
         magnetRadius,
         critChance,
+        critDamageMul,
         bonusProjCount,
         regenPerSec,
         armor,
         greedGoldMul,
         greedXpMul,
+        dashCdMul,
+        dashDistMul,
       };
     },
     []
@@ -973,7 +991,7 @@ export default function SurvivorGame() {
         if (card.consumableType === "heal") {
           st.hp = Math.min(st.maxHp, st.hp + Math.round(st.maxHp * 0.5));
         } else {
-          st.goldRun += 65;
+          st.goldRun += 100;
         }
         soundFX.playLevelUp();
       }
@@ -1031,6 +1049,7 @@ export default function SurvivorGame() {
         maxHp: 120,
         invulnTimer: 0,
         hurtFlashTimer: 0,
+        revivalsLeft: saveData.upgrades.revival || 0,
         xp: 0,
         xpToNext: 12,
         level: 1,
@@ -1099,7 +1118,7 @@ export default function SurvivorGame() {
       st.paused = true;
       st.gameOver = true;
 
-      const goldBonus = outcome === "victory" ? 150 : 0;
+      const goldBonus = outcome === "victory" ? 250 : 0;
       const totalGoldEarned = st.goldRun + goldBonus;
 
       updateSave((prev) => ({
@@ -1173,11 +1192,14 @@ export default function SurvivorGame() {
       st.facingX = st.dashDirX >= 0 ? 1 : -1;
     }
 
-    const maxCd = Math.max(1.8, Number((3.0 * stats.cooldownMul).toFixed(2)));
-    st.dashTimer = 0.18;
+    const maxCd = Math.max(
+      1.2,
+      Number((3.0 * stats.cooldownMul * stats.dashCdMul).toFixed(2))
+    );
+    st.dashTimer = 0.25;
     st.dashMaxCooldown = maxCd;
     st.dashCooldown = maxCd;
-    st.invulnTimer = Math.max(st.invulnTimer, 0.24);
+    st.invulnTimer = Math.max(st.invulnTimer, 0.32);
     soundFX.playDash();
   }, [computePlayerStats, saveData]);
 
@@ -1318,15 +1340,23 @@ export default function SurvivorGame() {
       const x = Math.max(MAP_WALK_MIN_X + 28, Math.min(MAP_WALK_MAX_X - 28, rawX));
       const y = Math.max(MAP_WALK_MIN_Y + 28, Math.min(MAP_WALK_MAX_Y - 28, rawY));
 
-      const timeScale = 1 + st.elapsedSec / 95 + (st.endlessMode ? (st.elapsedSec - 300) / 45 : 0);
+      const lateSurge =
+        (st.elapsedSec > 120 ? Math.pow((st.elapsedSec - 120) / 75, 1.35) : 0) +
+        (st.elapsedSec > 210 ? Math.pow((st.elapsedSec - 210) / 55, 1.5) : 0);
+      const timeScale =
+        1 +
+        st.elapsedSec / 78 +
+        lateSurge +
+        (st.endlessMode ? (st.elapsedSec - 300) / 32 : 0);
+      const speedScale = 1 + Math.min(0.28, st.elapsedSec * 0.00085);
 
       let name = "Decaying Skeleton";
       let radius = 14;
-      let hp = 28 * timeScale;
-      let speed = 64;
-      let damage = 10;
+      let hp = 32 * timeScale;
+      let speed = 68 * speedScale;
+      let damage = 12;
       let xpValue = 3;
-      let goldChance = 0.08;
+      let goldChance = 0.14;
       let isBoss = false;
       let isMiniBoss = false;
       let color = "#CBD5E1";
@@ -1334,45 +1364,45 @@ export default function SurvivorGame() {
       if (kind === "bat") {
         name = "Crypt Bat";
         radius = 11;
-        hp = 16 * timeScale;
-        speed = 96;
-        damage = 7;
+        hp = 19 * timeScale;
+        speed = 102 * speedScale;
+        damage = 9;
         xpValue = 2;
-        goldChance = 0.05;
+        goldChance = 0.09;
         color = "#A855F7";
       } else if (kind === "ghoul") {
         name = "Plague Ghoul";
         radius = 15;
-        hp = 46 * timeScale;
-        speed = 86;
-        damage = 14;
+        hp = 54 * timeScale;
+        speed = 90 * speedScale;
+        damage = 16;
         xpValue = 5;
-        goldChance = 0.12;
+        goldChance = 0.2;
         color = "#4ADE80";
       } else if (kind === "knight") {
         name = "Dread Knight";
         radius = 19;
-        hp = 115 * timeScale;
-        speed = 54;
-        damage = 20;
+        hp = 145 * timeScale;
+        speed = 58 * speedScale;
+        damage = 24;
         xpValue = 12;
-        goldChance = 0.22;
+        goldChance = 0.34;
         color = "#64748B";
       } else if (kind === "wraith") {
         name = "Abyssal Wraith";
         radius = 16;
-        hp = 82 * timeScale;
-        speed = 92;
-        damage = 18;
+        hp = 96 * timeScale;
+        speed = 95 * speedScale;
+        damage = 21;
         xpValue = 9;
-        goldChance = 0.18;
+        goldChance = 0.28;
         color = "#38BDF8";
       } else if (kind === "miniboss_goliath") {
         name = "Bone Goliath";
         radius = 52;
-        hp = 4350 * Math.max(1, timeScale * 0.75);
-        speed = 66;
-        damage = 26;
+        hp = 6200 * Math.max(1, timeScale * 0.85);
+        speed = 70;
+        damage = 30;
         xpValue = 65;
         goldChance = 1.0;
         isMiniBoss = true;
@@ -1380,9 +1410,9 @@ export default function SurvivorGame() {
       } else if (kind === "miniboss_necromancer") {
         name = "Arch-Lich Vespera";
         radius = 48;
-        hp = 8700 * Math.max(1, timeScale * 0.8);
-        speed = 62;
-        damage = 30;
+        hp = 13500 * Math.max(1, timeScale * 0.9);
+        speed = 66;
+        damage = 35;
         xpValue = 110;
         goldChance = 1.0;
         isMiniBoss = true;
@@ -1390,9 +1420,9 @@ export default function SurvivorGame() {
       } else if (kind === "boss_malphas") {
         name = "Malphas, The Dread Lord";
         radius = 64;
-        hp = 21600 * (st.endlessMode ? timeScale * 0.75 : 1);
-        speed = 76;
-        damage = 38;
+        hp = 36500 * (st.endlessMode ? timeScale * 0.85 : 1);
+        speed = 82;
+        damage = 44;
         xpValue = 250;
         goldChance = 1.0;
         isBoss = true;
@@ -1496,9 +1526,9 @@ export default function SurvivorGame() {
         }
       }
 
-      const bonusGold = 85 + Math.floor(Math.random() * 45);
+      const bonusGold = 130 + Math.floor(Math.random() * 65);
       st.goldRun += bonusGold;
-      st.hp = Math.min(st.maxHp, st.hp + Math.round(st.maxHp * 0.35));
+      st.hp = Math.min(st.maxHp, st.hp + Math.round(st.maxHp * 0.25));
 
       if (rewardItems.length === 0) {
         rewardItems.push({
@@ -1528,7 +1558,7 @@ export default function SurvivorGame() {
       const isCrit = Math.random() < stats.critChance;
       const finalDamage = Math.max(
         1,
-        Math.round(rawDamage * stats.mightMul * (isCrit ? 1.85 : 1.0))
+        Math.round(rawDamage * stats.mightMul * (isCrit ? stats.critDamageMul : 1.0))
       );
 
       enemy.hp -= finalDamage;
@@ -1549,7 +1579,7 @@ export default function SurvivorGame() {
         const dx = enemy.x - st.playerX;
         const dy = enemy.y - st.playerY;
         const len = Math.hypot(dx, dy) || 1;
-        const resist = enemy.isMiniBoss ? 0.25 : 1.0;
+        const resist = enemy.isMiniBoss ? 0.2 : enemy.kind === "knight" ? 0.35 : 0.85;
         enemy.x += (dx / len) * knockbackStrength * resist;
         enemy.y += (dy / len) * knockbackStrength * resist;
       }
@@ -1560,7 +1590,7 @@ export default function SurvivorGame() {
 
         // If Crimson Requiem ★ (Evolved Garlic) is equipped, small heal on kill
         const garlicWpn = st.weapons.find((w) => w.id === "garlic" && w.evolved);
-        if (garlicWpn && Math.random() < 0.22) {
+        if (garlicWpn && Math.random() < 0.08) {
           st.hp = Math.min(st.maxHp, st.hp + 1);
         }
 
@@ -1590,27 +1620,27 @@ export default function SurvivorGame() {
             kind: "gold",
             x: enemy.x + (Math.random() - 0.5) * 18,
             y: enemy.y + (Math.random() - 0.5) * 18,
-            value: enemy.isBoss ? 100 : enemy.isMiniBoss ? 45 : 6,
+            value: enemy.isBoss ? 180 : enemy.isMiniBoss ? 85 : 12,
             radius: 8,
             magnetized: false,
             bobOffset: Math.random() * Math.PI * 2,
           });
         }
 
-        // Rare utility drops (Meat, Magnet, Rosary Bomb)
+        // Utility drops (higher Meat drop rate + Magnet & Rosary)
         const utilRoll = Math.random();
-        if (utilRoll < 0.009) {
+        if (utilRoll < 0.014) {
           st.pickups.push({
             id: st.nextEntityId++,
             kind: "meat",
             x: enemy.x + 12,
             y: enemy.y,
-            value: 35,
+            value: 32,
             radius: 11,
             magnetized: false,
             bobOffset: 0,
           });
-        } else if (utilRoll >= 0.009 && utilRoll < 0.013) {
+        } else if (utilRoll >= 0.014 && utilRoll < 0.0165) {
           st.pickups.push({
             id: st.nextEntityId++,
             kind: "magnet",
@@ -1621,7 +1651,7 @@ export default function SurvivorGame() {
             magnetized: false,
             bobOffset: 0,
           });
-        } else if (utilRoll >= 0.013 && utilRoll < 0.0155) {
+        } else if (utilRoll >= 0.0165 && utilRoll < 0.018) {
           st.pickups.push({
             id: st.nextEntityId++,
             kind: "rosary",
@@ -1651,7 +1681,7 @@ export default function SurvivorGame() {
             kind: "meat",
             x: enemy.x + 28,
             y: enemy.y,
-            value: 50,
+            value: 45,
             radius: 12,
             magnetized: false,
             bobOffset: 0,
@@ -1707,7 +1737,7 @@ export default function SurvivorGame() {
       // 1. Player Movement & Dash (WASD / Arrows + Virtual Joystick + Space Dash)
       if (st.dashTimer > 0) {
         st.dashTimer = Math.max(0, st.dashTimer - dt);
-        const dashSpeed = stats.moveSpeed * 3.45;
+        const dashSpeed = stats.moveSpeed * 4.25 * stats.dashDistMul;
         st.playerX += st.dashDirX * dashSpeed * dt;
         st.playerY += st.dashDirY * dashSpeed * dt;
         st.isMoving = true;
@@ -1780,48 +1810,56 @@ export default function SurvivorGame() {
       st.spawnTimer -= dt;
       if (st.spawnTimer <= 0) {
         const t = st.elapsedSec;
-        const maxEnemiesOnScreen = t > 210 ? 220 : t > 120 ? 165 : 115;
+        const maxEnemiesOnScreen = t > 210 ? 265 : t > 120 ? 195 : 135;
 
         if (st.enemies.length < maxEnemiesOnScreen) {
-          const batchCount = t > 220 ? 6 : t > 120 ? 4 : 3;
+          const batchCount = t > 220 ? 7 : t > 120 ? 5 : 3;
           for (let i = 0; i < batchCount; i++) {
             const r = Math.random();
             let kind: EnemyKind = "skeleton";
-            if (t < 45) {
+            if (t < 40) {
               kind = r < 0.45 ? "bat" : "skeleton";
-            } else if (t < 110) {
-              kind = r < 0.3 ? "bat" : r < 0.72 ? "skeleton" : "ghoul";
-            } else if (t < 190) {
+            } else if (t < 100) {
+              kind = r < 0.25 ? "bat" : r < 0.65 ? "skeleton" : "ghoul";
+            } else if (t < 180) {
               kind =
-                r < 0.2
+                r < 0.15
                   ? "bat"
-                  : r < 0.55
+                  : r < 0.48
                     ? "ghoul"
-                    : r < 0.82
+                    : r < 0.78
                       ? "knight"
                       : "wraith";
             } else {
               kind =
-                r < 0.28
+                r < 0.22
                   ? "ghoul"
-                  : r < 0.65
+                  : r < 0.6
                     ? "knight"
                     : "wraith";
             }
             spawnEnemy(st, kind);
           }
         }
-        st.spawnTimer = Math.max(0.38, 1.25 - st.elapsedSec * 0.0028);
+        st.spawnTimer = Math.max(0.32, 1.15 - st.elapsedSec * 0.003);
       }
 
-      // Periodic Encirclement Swarm Waves every 45s
-      const expectedSwarmWaves = Math.floor(st.elapsedSec / 45);
+      // Periodic Encirclement Swarm Waves every 30s
+      const expectedSwarmWaves = Math.floor(st.elapsedSec / 30);
       if (expectedSwarmWaves > st.swarmWaveCount) {
         st.swarmWaveCount = expectedSwarmWaves;
-        const swarmSize = 14 + expectedSwarmWaves * 4;
+        const swarmSize = 14 + expectedSwarmWaves * 3;
         for (let i = 0; i < swarmSize; i++) {
           const ang = (Math.PI * 2 * i) / swarmSize;
-          spawnEnemy(st, expectedSwarmWaves % 2 === 1 ? "bat" : "ghoul", ang, 490);
+          let swarmKind: EnemyKind = "bat";
+          if (expectedSwarmWaves >= 6) {
+            swarmKind = i % 3 === 0 ? "knight" : "wraith";
+          } else if (expectedSwarmWaves >= 4) {
+            swarmKind = i % 2 === 0 ? "ghoul" : "wraith";
+          } else if (expectedSwarmWaves >= 2) {
+            swarmKind = "ghoul";
+          }
+          spawnEnemy(st, swarmKind, ang, 490);
         }
       }
 
@@ -1863,7 +1901,7 @@ export default function SurvivorGame() {
               if (st.attackAnimTimer <= 0) {
                 st.attackAnimTimer = 0.44;
               }
-              damageEnemy(st, enemy, lvStat.damage, "garlic", stats, w.evolved ? 16 : 11);
+              damageEnemy(st, enemy, lvStat.damage, "garlic", stats, w.evolved ? 11 : 7);
             }
           }
           continue;
@@ -1888,7 +1926,7 @@ export default function SurvivorGame() {
                 if (st.attackAnimTimer <= 0) {
                   st.attackAnimTimer = 0.44;
                 }
-                damageEnemy(st, enemy, lvStat.damage, "bible", stats, 22);
+                damageEnemy(st, enemy, lvStat.damage, "bible", stats, 10);
               }
             }
           }
@@ -2108,9 +2146,33 @@ export default function SurvivorGame() {
               soundFX.playPlayerHurt();
               addFloatingText(st, st.playerX, st.playerY - 18, `-${taken}`, "#EF4444");
               if (st.hp <= 0) {
-                st.hp = 0;
-                concludeRun("defeat");
-                return;
+                if (st.revivalsLeft > 0) {
+                  st.revivalsLeft -= 1;
+                  st.hp = Math.round(st.maxHp * 0.5);
+                  st.invulnTimer = 2.2;
+                  st.screenShake = 14;
+                  soundFX.playEvolution();
+                  spawnParticles(st, st.playerX, st.playerY, "#FBBF24", 36, 220);
+                  addFloatingText(
+                    st,
+                    st.playerX,
+                    st.playerY - 34,
+                    "✦ PHOENIX REVIVAL! ✦",
+                    "#FBBF24",
+                    true
+                  );
+                  for (const ne of st.enemies) {
+                    const nd = Math.hypot(ne.x - st.playerX, ne.y - st.playerY) || 1;
+                    if (nd < 260 && !ne.isBoss) {
+                      ne.x += ((ne.x - st.playerX) / nd) * 140;
+                      ne.y += ((ne.y - st.playerY) / nd) * 140;
+                    }
+                  }
+                } else {
+                  st.hp = 0;
+                  concludeRun("defeat");
+                  return;
+                }
               }
             }
             st.projectiles.splice(i, 1);
@@ -2197,26 +2259,59 @@ export default function SurvivorGame() {
           continue;
         }
 
+        // Ranged Spectral Bolt from Abyssal Wraiths & Arch-Lich Vespera
+        if (e.kind === "wraith" || e.kind === "miniboss_necromancer") {
+          e.aiTimer -= dt;
+          if (e.aiTimer <= 0) {
+            e.aiTimer = e.kind === "miniboss_necromancer" ? 2.4 : 3.4;
+            if (dist < (e.kind === "miniboss_necromancer" ? 500 : 380)) {
+              const baseAng = Math.atan2(dy, dx);
+              const shotCount = e.kind === "miniboss_necromancer" ? 3 : 1;
+              for (let s = 0; s < shotCount; s++) {
+                const shotAng = baseAng + (s - (shotCount - 1) / 2) * 0.22;
+                st.projectiles.push({
+                  id: st.nextEntityId++,
+                  weaponId: "wand",
+                  isEvolved: false,
+                  isEnemyProjectile: true,
+                  x: e.x,
+                  y: e.y,
+                  vx: Math.cos(shotAng) * (e.kind === "miniboss_necromancer" ? 225 : 195),
+                  vy: Math.sin(shotAng) * (e.kind === "miniboss_necromancer" ? 225 : 195),
+                  radius: e.kind === "miniboss_necromancer" ? 8 : 6,
+                  damage: Math.round(e.damage * 0.72),
+                  pierceLeft: 1,
+                  hitEnemyIds: new Set(),
+                  ttl: 2.8,
+                  maxTtl: 2.8,
+                  color: e.kind === "miniboss_necromancer" ? "#C084FC" : "#38BDF8",
+                });
+              }
+            }
+          }
+        }
+
         // Boss / Mini-boss dash & projectile patterns
         let speedMultiplier = 1.0;
         if (e.dashState) {
+          const isEnraged = e.isBoss && e.hp < e.maxHp * 0.5;
           e.dashState.timer -= dt;
           if (e.dashState.phase === "idle" && e.dashState.timer <= 0) {
             e.dashState.phase = "telegraph";
-            e.dashState.timer = 0.85;
-            e.dashState.targetX = st.playerX + (dx / dist) * 140;
-            e.dashState.targetY = st.playerY + (dy / dist) * 140;
+            e.dashState.timer = isEnraged ? 0.65 : 0.8;
+            e.dashState.targetX = st.playerX + (dx / dist) * 150;
+            e.dashState.targetY = st.playerY + (dy / dist) * 150;
           } else if (e.dashState.phase === "telegraph") {
             speedMultiplier = 0.15;
             if (e.dashState.timer <= 0) {
               e.dashState.phase = "dashing";
-              e.dashState.timer = 0.65;
-              // If Necromancer or Malphas, also fire dark radial orbs
+              e.dashState.timer = 0.68;
+              // If Necromancer or Malphas, fire dark radial orbs
               if (e.kind === "miniboss_necromancer" || e.kind === "boss_malphas") {
-                const count = e.kind === "boss_malphas" ? 8 : 5;
+                const count = e.kind === "boss_malphas" ? (isEnraged ? 9 : 7) : 7;
                 for (let k = 0; k < count; k++) {
                   const orbAng =
-                    Math.atan2(dy, dx) + ((k - (count - 1) / 2) * Math.PI) / 6;
+                    Math.atan2(dy, dx) + ((k - (count - 1) / 2) * Math.PI) / 6.5;
                   st.projectiles.push({
                     id: st.nextEntityId++,
                     weaponId: "wand",
@@ -2224,24 +2319,74 @@ export default function SurvivorGame() {
                     isEnemyProjectile: true,
                     x: e.x,
                     y: e.y,
-                    vx: Math.cos(orbAng) * 235,
-                    vy: Math.sin(orbAng) * 235,
+                    vx: Math.cos(orbAng) * (isEnraged ? 265 : 235),
+                    vy: Math.sin(orbAng) * (isEnraged ? 265 : 235),
                     radius: 8,
-                    damage: Math.round(e.damage * 0.7),
+                    damage: Math.round(e.damage * 0.75),
                     pierceLeft: 1,
                     hitEnemyIds: new Set(),
-                    ttl: 3.2,
-                    maxTtl: 3.2,
+                    ttl: 3.4,
+                    maxTtl: 3.4,
                     color: "#F43F5E",
                   });
                 }
               }
             }
           } else if (e.dashState.phase === "dashing") {
-            speedMultiplier = 3.2;
+            speedMultiplier = isEnraged ? 3.65 : 3.3;
             if (e.dashState.timer <= 0) {
               e.dashState.phase = "idle";
-              e.dashState.timer = e.isBoss ? 3.2 : 4.5;
+              e.dashState.timer = e.isBoss ? (isEnraged ? 2.0 : 2.7) : 3.4;
+
+              // Bone Goliath Ground-Slam Shockwave Ring at end of charge
+              if (e.kind === "miniboss_goliath") {
+                st.screenShake = 8;
+                for (let k = 0; k < 6; k++) {
+                  const slamAng = (Math.PI * 2 * k) / 6;
+                  st.projectiles.push({
+                    id: st.nextEntityId++,
+                    weaponId: "wand",
+                    isEvolved: false,
+                    isEnemyProjectile: true,
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(slamAng) * 205,
+                    vy: Math.sin(slamAng) * 205,
+                    radius: 9,
+                    damage: Math.round(e.damage * 0.75),
+                    pierceLeft: 1,
+                    hitEnemyIds: new Set(),
+                    ttl: 2.2,
+                    maxTtl: 2.2,
+                    color: "#F59E0B",
+                  });
+                }
+              }
+
+              // Malphas Enrage 360° Bullet-Hell Ring at end of charge
+              if (e.kind === "boss_malphas" && isEnraged) {
+                st.screenShake = 11;
+                for (let k = 0; k < 12; k++) {
+                  const ringAng = (Math.PI * 2 * k) / 12;
+                  st.projectiles.push({
+                    id: st.nextEntityId++,
+                    weaponId: "wand",
+                    isEvolved: false,
+                    isEnemyProjectile: true,
+                    x: e.x,
+                    y: e.y,
+                    vx: Math.cos(ringAng) * 220,
+                    vy: Math.sin(ringAng) * 220,
+                    radius: 8,
+                    damage: Math.round(e.damage * 0.72),
+                    pierceLeft: 1,
+                    hitEnemyIds: new Set(),
+                    ttl: 3.0,
+                    maxTtl: 3.0,
+                    color: "#EF4444",
+                  });
+                }
+              }
             }
           }
         }
@@ -2273,9 +2418,33 @@ export default function SurvivorGame() {
           soundFX.playPlayerHurt();
           addFloatingText(st, st.playerX, st.playerY - 22, `-${dmgTaken}`, "#EF4444");
           if (st.hp <= 0) {
-            st.hp = 0;
-            concludeRun("defeat");
-            return;
+            if (st.revivalsLeft > 0) {
+              st.revivalsLeft -= 1;
+              st.hp = Math.round(st.maxHp * 0.5);
+              st.invulnTimer = 2.2;
+              st.screenShake = 14;
+              soundFX.playEvolution();
+              spawnParticles(st, st.playerX, st.playerY, "#FBBF24", 36, 220);
+              addFloatingText(
+                st,
+                st.playerX,
+                st.playerY - 34,
+                "✦ PHOENIX REVIVAL! ✦",
+                "#FBBF24",
+                true
+              );
+              for (const ne of st.enemies) {
+                const nd = Math.hypot(ne.x - st.playerX, ne.y - st.playerY) || 1;
+                if (nd < 260 && !ne.isBoss) {
+                  ne.x += ((ne.x - st.playerX) / nd) * 140;
+                  ne.y += ((ne.y - st.playerY) / nd) * 140;
+                }
+              }
+            } else {
+              st.hp = 0;
+              concludeRun("defeat");
+              return;
+            }
           }
         }
       }
@@ -3431,70 +3600,70 @@ export default function SurvivorGame() {
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#D4AF37]/70 to-transparent" />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[#C92A3E]/50 to-transparent" />
 
-              <div className="flex flex-col gap-4 p-5 sm:p-6 lg:flex-row lg:items-start lg:justify-between">
-                <div>
+              <div className="flex flex-col gap-3.5 p-4 sm:p-6 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex items-center justify-between lg:block">
                   <h1>
                     <span className="sr-only">Sovereign Survivors</span>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src="/logo/logo.png"
                       alt="Sovereign Survivors"
-                      className="h-24 w-auto object-contain [image-rendering:pixelated] drop-shadow-[0_6px_20px_rgba(212,175,55,0.32)] sm:h-28"
+                      className="h-20 w-auto object-contain [image-rendering:pixelated] drop-shadow-[0_6px_20px_rgba(212,175,55,0.32)] sm:h-28"
                     />
                   </h1>
                 </div>
 
-                {/* Gold, Best Record & Simple Audio Bar (Single Horizontal Row, Top-Aligned) */}
-                <div className="flex flex-row flex-wrap items-stretch gap-2.5 sm:flex-nowrap">
+                {/* Gold, Best Record & Settings Bar (Responsive Single Row on Mobile & Desktop) */}
+                <div className="flex w-full flex-row items-stretch gap-2 sm:w-auto sm:gap-2.5">
                   {/* Unified Gold & Best Record Reliquary */}
-                  <div className="flex flex-row items-center divide-x divide-[#282238] rounded-xl border border-[#D4AF37]/40 bg-[#0B0910]/95 shadow-[0_8px_24px_rgba(0,0,0,0.55),inset_0_0_16px_rgba(212,175,55,0.08)]">
+                  <div className="grid flex-1 grid-cols-3 divide-x divide-[#282238] overflow-hidden rounded-xl border border-[#D4AF37]/40 bg-[#0B0910]/95 shadow-[0_8px_24px_rgba(0,0,0,0.55),inset_0_0_16px_rgba(212,175,55,0.08)] sm:flex sm:flex-initial sm:flex-row sm:items-center">
                     {/* Gold Balance */}
-                    <div className="flex items-center gap-2 px-3 py-2">
+                    <div className="flex items-center justify-center gap-1.5 px-2 py-2 sm:justify-start sm:gap-2 sm:px-3">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={PICKUP_ICON_URLS.gold}
                         alt="Gold"
-                        className="h-5 w-5 shrink-0 object-contain [image-rendering:pixelated]"
+                        className="h-4 w-4 shrink-0 object-contain [image-rendering:pixelated] sm:h-5 sm:w-5"
                       />
-                      <div>
-                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#A39E93]">
+                      <div className="min-w-0">
+                        <div className="text-[8px] font-bold uppercase tracking-wider text-[#A39E93] sm:text-[9px]">
                           Gold
                         </div>
-                        <div className="font-mono text-sm font-black leading-tight text-[#F3C65F]">
+                        <div className="truncate font-mono text-xs font-black leading-tight text-[#F3C65F] sm:text-sm">
                           {saveData.gold.toLocaleString()}
-                          <span className="ml-0.5 text-[11px] font-bold text-[#D4AF37]">G</span>
+                          <span className="ml-0.5 text-[10px] font-bold text-[#D4AF37]">G</span>
                         </div>
                       </div>
                     </div>
 
                     {/* Best Survival Time */}
-                    <div className="flex items-center gap-2 px-3 py-2">
-                      <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[#38BDF8]/30 bg-[#101C29] text-[11px] text-[#7DD3FC]">
+                    <div className="flex items-center justify-center gap-1.5 px-2 py-2 sm:justify-start sm:gap-2 sm:px-3">
+                      <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded border border-[#38BDF8]/30 bg-[#101C29] text-[10px] text-[#7DD3FC] sm:h-5 sm:w-5 sm:text-[11px]">
                         ⏱
                       </div>
-                      <div>
-                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#A39E93]">
+                      <div className="min-w-0">
+                        <div className="text-[8px] font-bold uppercase tracking-wider text-[#A39E93] sm:text-[9px]">
                           Best
                         </div>
-                        <div className="font-mono text-sm font-black leading-tight text-[#EAE6DF]">
+                        <div className="truncate font-mono text-xs font-black leading-tight text-[#EAE6DF] sm:text-sm">
                           {formatTime(saveData.bestTimeSec)}
                         </div>
                       </div>
                     </div>
 
                     {/* Total Slain */}
-                    <div className="flex items-center gap-2 px-3 py-2">
+                    <div className="flex items-center justify-center gap-1.5 px-2 py-2 sm:justify-start sm:gap-2 sm:px-3">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={PASSIVE_ICON_URLS.spinach}
                         alt="Slain"
-                        className="h-5 w-5 shrink-0 object-contain [image-rendering:pixelated]"
+                        className="h-4 w-4 shrink-0 object-contain [image-rendering:pixelated] sm:h-5 sm:w-5"
                       />
-                      <div>
-                        <div className="text-[9px] font-bold uppercase tracking-wider text-[#A39E93]">
+                      <div className="min-w-0">
+                        <div className="text-[8px] font-bold uppercase tracking-wider text-[#A39E93] sm:text-[9px]">
                           Slain
                         </div>
-                        <div className="font-mono text-sm font-black leading-tight text-[#FCA5A5]">
+                        <div className="truncate font-mono text-xs font-black leading-tight text-[#FCA5A5] sm:text-sm">
                           {saveData.totalKills.toLocaleString()}
                         </div>
                       </div>
@@ -3505,10 +3674,10 @@ export default function SurvivorGame() {
                   <button
                     onClick={() => setSettingsModalOpen(true)}
                     title="Open Settings"
-                    className="flex flex-row items-center gap-2 rounded-xl border border-[#D4AF37]/40 bg-[#0B0910]/95 px-3.5 py-2.5 text-xs font-bold text-[#EAE6DF] shadow-[0_8px_24px_rgba(0,0,0,0.55)] transition hover:border-[#F3C65F] hover:bg-[#171222] hover:text-white"
+                    className="flex shrink-0 flex-row items-center justify-center gap-1.5 rounded-xl border border-[#D4AF37]/40 bg-[#0B0910]/95 px-3 py-2 text-xs font-bold text-[#EAE6DF] shadow-[0_8px_24px_rgba(0,0,0,0.55)] transition hover:border-[#F3C65F] hover:bg-[#171222] hover:text-white sm:gap-2 sm:px-3.5 sm:py-2.5"
                   >
                     <span className="text-sm">{muted ? "🔇" : "⚙️"}</span>
-                    <span className="font-serif uppercase tracking-wider text-[#F3C65F]">
+                    <span className="hidden font-serif uppercase tracking-wider text-[#F3C65F] sm:inline">
                       Settings
                     </span>
                   </button>
@@ -3922,15 +4091,6 @@ export default function SurvivorGame() {
                   <p className="text-sm text-[#A39E93]">
                     Permanent blessings inscribed into your bloodline. Applies to all Champions across every run.
                   </p>
-                  <button
-                    onClick={() => {
-                      soundFX.playXpGem();
-                      updateSave((prev) => ({ ...prev, gold: prev.gold + 500 }));
-                    }}
-                    className="rounded-lg border border-[#D4AF37]/40 bg-[#D4AF37]/10 px-3 py-1.5 text-xs font-bold text-[#F3C65F] hover:bg-[#D4AF37]/20 transition"
-                  >
-                    +500 Tribute Gold (Practice Grant)
-                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -4339,9 +4499,12 @@ export default function SurvivorGame() {
                 <div className="flex items-center gap-2 font-serif tracking-wider text-[#BDB8AD] uppercase">
                   <span className="text-[#D4AF37]">✦</span>
                   <span>Sovereign Survivors</span>
+                  <span className="rounded-md border border-[#D4AF37]/30 bg-[#1A1424]/90 px-2 py-0.5 font-mono text-[10px] font-semibold lowercase tracking-normal text-[#F3C65F]">
+                    v0.1.0-alpha
+                  </span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span>Dibuat oleh</span>
+                  <span>Created by</span>
                   <a
                     href="https://kplevi.vercel.app/"
                     target="_blank"
@@ -4471,22 +4634,22 @@ export default function SurvivorGame() {
           />
 
           {/* Top XP Bar, Vitality HP Bar & HUD Overlay */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-3 sm:p-4">
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-2 sm:p-4">
             <div className="mx-auto max-w-5xl">
               {/* Ornate Gothic EXP Bar with Level Crest */}
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-1.5 sm:gap-2.5">
                 {/* Left Ornate Level Crest */}
-                <div className="relative flex h-9 shrink-0 items-center gap-1.5 rounded-xl border-2 border-[#D4AF37] bg-gradient-to-b from-[#231B30] to-[#0D0A14] px-3 shadow-[0_0_18px_rgba(212,175,55,0.35)]">
-                  <span className="text-xs text-[#F3C65F]">✦</span>
-                  <span className="font-serif text-xs font-black tracking-wider text-[#FFFDF9]">
+                <div className="relative flex h-7 shrink-0 items-center gap-1 rounded-lg border-2 border-[#D4AF37] bg-gradient-to-b from-[#231B30] to-[#0D0A14] px-2 shadow-[0_0_18px_rgba(212,175,55,0.35)] sm:h-9 sm:gap-1.5 sm:rounded-xl sm:px-3">
+                  <span className="text-[10px] text-[#F3C65F] sm:text-xs">✦</span>
+                  <span className="font-serif text-[11px] font-black tracking-wider text-[#FFFDF9] sm:text-xs">
                     LV.{hud.level}
                   </span>
                 </div>
 
                 {/* Textured & Segmented Arcane EXP Bar */}
-                <div className="relative h-7 flex-1 overflow-hidden rounded-xl border-2 border-[#D4AF37]/80 bg-[#08070C]/95 p-0.5 shadow-[0_6px_20px_rgba(0,0,0,0.8),inset_0_2px_8px_rgba(0,0,0,0.9)]">
+                <div className="relative h-6 flex-1 overflow-hidden rounded-lg border-2 border-[#D4AF37]/80 bg-[#08070C]/95 p-0.5 shadow-[0_6px_20px_rgba(0,0,0,0.8),inset_0_2px_8px_rgba(0,0,0,0.9)] sm:h-7 sm:rounded-xl">
                   {/* Inner Track */}
-                  <div className="relative h-full w-full overflow-hidden rounded-lg bg-[#0F1626]">
+                  <div className="relative h-full w-full overflow-hidden rounded-md bg-[#0F1626] sm:rounded-lg">
                     {/* Liquid Arcane EXP Fill */}
                     <div
                       className="relative h-full bg-gradient-to-r from-[#0369A1] via-[#0EA5E9] to-[#67E8F9] transition-all duration-150 shadow-[0_0_16px_rgba(56,189,248,0.65)]"
@@ -4521,9 +4684,9 @@ export default function SurvivorGame() {
                     />
 
                     {/* EXP Text Overlay */}
-                    <div className="absolute inset-0 flex items-center justify-between px-3 font-mono text-[11px] font-black tracking-wider text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)]">
-                      <span className="text-[#BAE6FD]">ARCANE ESSENCE</span>
-                      <span>
+                    <div className="absolute inset-0 flex items-center justify-between px-2 font-mono text-[10px] font-black tracking-wider text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:px-3 sm:text-[11px]">
+                      <span className="hidden text-[#BAE6FD] sm:inline">ARCANE ESSENCE</span>
+                      <span className="ml-auto">
                         {Math.floor(hud.xp)} / {hud.xpToNext} XP (
                         {Math.min(
                           100,
@@ -4536,37 +4699,271 @@ export default function SurvivorGame() {
                 </div>
               </div>
 
-              {/* Second Row: Player Vitality Bar & 6+6 Relic Slots | Timer | Kills & Gold & Pause */}
-              <div className="mt-2.5 flex flex-wrap items-start justify-between gap-2.5">
-                {/* Left: Ornate Player Vitality HP Bar + Equipped Weapons (6) & Passives (6) */}
-                <div className="space-y-1.5">
+              {/* Second Row: Responsive Mobile & Desktop HUD Layout */}
+              <div className="mt-1.5 flex flex-col gap-1.5 sm:mt-2.5 md:flex-row md:items-start md:justify-between md:gap-2.5">
+                {/* Top Sub-Row on Mobile (Center + Right on Desktop): Timer + Kills/Gold/FPS + Audio + Pause */}
+                <div className="order-1 flex w-full items-center justify-between gap-1.5 md:order-2 md:contents">
+                  {/* Center: Ornate Gothic Survival Chronometer & Boss Milestone */}
+                  <div className="relative flex min-w-[108px] flex-col items-center overflow-hidden rounded-xl border border-[#D4AF37]/65 bg-gradient-to-b from-[#181326]/95 via-[#0E0B16]/95 to-[#08070C]/95 px-2.5 py-1 shadow-[0_8px_24px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-md sm:min-w-[184px] sm:px-4 sm:py-1.5 md:order-2">
+                    {/* Top Ornamental Gold Hairline */}
+                    <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#D4AF37] to-transparent" />
+
+                    <div className="flex items-center gap-1 sm:gap-2">
+                      <span className="hidden text-[10px] text-[#D4AF37]/80 sm:inline">✦</span>
+                      <div className="font-mono text-sm font-black tracking-[0.1em] text-[#FFFDF9] drop-shadow-[0_2px_8px_rgba(212,175,55,0.35)] sm:text-2xl sm:tracking-[0.14em]">
+                        {formatTime(hud.elapsedSec)}
+                      </div>
+                      <span className="hidden text-[10px] text-[#D4AF37]/80 sm:inline">✦</span>
+                    </div>
+
+                    {/* Next Boss Milestone Label & Mini Progress Track */}
+                    <div className="flex w-full items-center justify-between gap-1.5 font-mono text-[8px] font-extrabold uppercase tracking-wider sm:mt-0.5 sm:gap-2 sm:text-[9px]">
+                      <span
+                        className={`truncate ${
+                          hud.isEndlessOvertime
+                            ? "text-[#F87171]"
+                            : hud.activeBoss
+                              ? "animate-pulse text-[#EF4444]"
+                              : "text-[#F3C65F]"
+                        }`}
+                      >
+                        {hud.isEndlessOvertime
+                          ? "∞ Endless"
+                          : hud.activeBoss
+                            ? "⚔ Boss"
+                            : hud.elapsedSec < 90
+                              ? "Goliath"
+                              : hud.elapsedSec < 180
+                                ? "Vespera"
+                                : "Malphas"}
+                      </span>
+                      <span className="shrink-0 text-[#A39E93]">
+                        {hud.isEndlessOvertime
+                          ? "SURVIVE"
+                          : hud.elapsedSec < 90
+                            ? "01:30"
+                            : hud.elapsedSec < 180
+                              ? "03:00"
+                              : "05:00"}
+                      </span>
+                    </div>
+
+                    <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-[#1C162B] sm:mt-1">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          hud.isEndlessOvertime || hud.activeBoss
+                            ? "bg-gradient-to-r from-[#DC2626] to-[#F59E0B]"
+                            : "bg-gradient-to-r from-[#B48222] via-[#F3C65F] to-[#FFFDF9]"
+                        }`}
+                        style={{
+                          width: `${
+                            hud.isEndlessOvertime
+                              ? 100
+                              : hud.elapsedSec < 90
+                                ? Math.min(100, (hud.elapsedSec / 90) * 100)
+                                : hud.elapsedSec < 180
+                                  ? Math.min(100, ((hud.elapsedSec - 90) / 90) * 100)
+                                  : Math.min(100, ((hud.elapsedSec - 180) / 120) * 100)
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Right: Ornate Spoils (Kills & Gold), FPS Telemetry & Controls */}
+                  <div className="pointer-events-auto flex items-center gap-1 sm:gap-2 md:order-3">
+                    {/* Unified Gothic Reliquary Bar for Kills, Gold & FPS */}
+                    <div className="relative flex items-center divide-x divide-[#2A233B] overflow-hidden rounded-xl border border-[#D4AF37]/55 bg-[#0D0B14]/92 shadow-[0_6px_18px_rgba(0,0,0,0.75)] backdrop-blur-md">
+                      <div className="pointer-events-none absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-[#D4AF37]/60 to-transparent" />
+
+                      {/* Slain / Kills Counter */}
+                      <div className="flex items-center gap-1 px-2 py-1 sm:gap-2 sm:px-3 sm:py-1.5">
+                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[#EF4444]/40 bg-[#1A0D14] p-0.5 shadow-inner sm:h-7 sm:w-7 sm:rounded-lg">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={PASSIVE_ICON_URLS.spinach}
+                            alt="Slain"
+                            className="h-full w-full object-contain [image-rendering:pixelated]"
+                          />
+                        </div>
+                        <div>
+                          <div className="hidden font-serif text-[9px] font-bold uppercase tracking-wider text-[#FCA5A5] sm:block">
+                            Slain
+                          </div>
+                          <div className="font-mono text-[11px] font-black leading-tight text-white sm:text-xs">
+                            {hud.kills.toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Sovereign Gold Counter */}
+                      <div className="flex items-center gap-1 px-2 py-1 sm:gap-2 sm:px-3 sm:py-1.5">
+                        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[#D4AF37]/45 bg-[#19140D] p-0.5 shadow-inner sm:h-7 sm:w-7 sm:rounded-lg">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={PICKUP_ICON_URLS.gold}
+                            alt="Gold"
+                            className="h-full w-full object-contain [image-rendering:pixelated]"
+                          />
+                        </div>
+                        <div>
+                          <div className="hidden font-serif text-[9px] font-bold uppercase tracking-wider text-[#D4AF37] sm:block">
+                            Spoils
+                          </div>
+                          <div className="font-mono text-[11px] font-black leading-tight text-[#F3C65F] sm:text-xs">
+                            {hud.goldRun.toLocaleString()}
+                            <span className="ml-0.5 text-[9px] sm:text-[10px]">G</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* FPS Telemetry Indicator */}
+                      <div className="flex items-center gap-1 px-2 py-1 sm:gap-2 sm:px-3 sm:py-1.5">
+                        <span
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full sm:h-2 sm:w-2 ${
+                            hud.fps >= 55
+                              ? "bg-[#4ADE80] shadow-[0_0_8px_#4ADE80]"
+                              : hud.fps >= 35
+                                ? "bg-[#FBBF24] shadow-[0_0_8px_#FBBF24]"
+                                : "bg-[#EF4444] shadow-[0_0_8px_#EF4444]"
+                          }`}
+                        />
+                        <div>
+                          <div className="hidden font-serif text-[9px] font-bold uppercase tracking-wider text-[#A39E93] sm:block">
+                            Perf
+                          </div>
+                          <div
+                            className={`font-mono text-[10px] font-black leading-tight sm:text-xs ${
+                              hud.fps >= 55
+                                ? "text-[#4ADE80]"
+                                : hud.fps >= 35
+                                  ? "text-[#FBBF24]"
+                                  : "text-[#EF4444]"
+                            }`}
+                          >
+                            {hud.fps}
+                            <span className="hidden text-[9px] font-bold opacity-80 sm:inline">
+                              {" "}
+                              FPS
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Audio Mixer Popover Button */}
+                    <div className="relative">
+                      <button
+                        onClick={() => setAudioPopoverOpen((prev) => !prev)}
+                        title="Audio Mixer (Music & SFX Volume)"
+                        className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all sm:h-10 sm:w-10 sm:rounded-xl ${
+                          muted
+                            ? "border-[#EF4444]/50 bg-[#1A0D12]/90 text-[#FCA5A5] hover:border-[#EF4444]"
+                            : "border-[#D4AF37]/50 bg-[#120F1B]/90 text-[#F3C65F] hover:border-[#D4AF37] hover:bg-[#1B1628]"
+                        } shadow-[0_6px_18px_rgba(0,0,0,0.75)] backdrop-blur-md`}
+                      >
+                        <span className="text-xs sm:text-sm">{muted ? "🔇" : "🔊"}</span>
+                      </button>
+
+                      {audioPopoverOpen && (
+                        <div className="absolute right-0 top-10 z-30 w-52 rounded-xl border border-[#D4AF37]/60 bg-[#0E0B16]/95 p-3 shadow-[0_12px_30px_rgba(0,0,0,0.9)] backdrop-blur-md sm:top-12 sm:w-56 sm:p-3.5">
+                          <div className="flex items-center justify-between border-b border-[#262134] pb-2">
+                            <span className="font-serif text-[11px] font-bold uppercase tracking-wider text-[#F3C65F]">
+                              ✦ Audio Mixer
+                            </span>
+                            <button
+                              onClick={toggleMute}
+                              className={`rounded px-2 py-0.5 font-mono text-[10px] font-bold ${
+                                muted
+                                  ? "bg-[#EF4444]/25 text-[#FCA5A5]"
+                                  : "bg-[#262134] text-[#EAE6DF] hover:text-white"
+                              }`}
+                            >
+                              {muted ? "Unmute" : "Mute All"}
+                            </button>
+                          </div>
+
+                          <div className="mt-3 space-y-2.5 font-mono text-[11px]">
+                            <div>
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-[#BAE6FD]">🎵 Music Volume</span>
+                                <span className="text-white">{muted ? 0 : musicVol}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                value={muted ? 0 : musicVol}
+                                onChange={(e) => handleMusicVolChange(Number(e.target.value))}
+                                className="mt-1 h-1.5 w-full cursor-pointer accent-[#38BDF8]"
+                              />
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between">
+                                <span className="font-bold text-[#F3C65F]">⚔️ SFX Volume</span>
+                                <span className="text-white">{muted ? 0 : sfxVol}%</span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                value={muted ? 0 : sfxVol}
+                                onChange={(e) => handleSfxVolChange(Number(e.target.value))}
+                                className="mt-1 h-1.5 w-full cursor-pointer accent-[#F3C65F]"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Pause Button */}
+                    <button
+                      onClick={() => {
+                        const st = engineRef.current;
+                        if (!st) return;
+                        st.paused = true;
+                        setPauseModalOpen(true);
+                      }}
+                      className="flex h-8 items-center gap-1 rounded-lg border border-[#D4AF37]/55 bg-gradient-to-b from-[#1D172B]/95 to-[#0E0B16]/95 px-2.5 font-serif text-xs font-bold uppercase tracking-wider text-[#FFFDF9] shadow-[0_6px_18px_rgba(0,0,0,0.75)] backdrop-blur-md transition-all hover:border-[#F3C65F] hover:text-[#F3C65F] sm:h-10 sm:gap-1.5 sm:rounded-xl sm:px-3.5"
+                    >
+                      <span className="font-mono text-[10px] text-[#F3C65F]">⏸</span>
+                      <span className="hidden sm:inline">Pause</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Left (Bottom Sub-Row on Mobile, Left on Desktop): Vitality HP Bar + 6+6 Relic Slots */}
+                <div className="order-2 flex flex-wrap items-center justify-between gap-1.5 md:order-1 md:block md:space-y-1.5">
                   {/* Ornate Champion Vitality (HP) Bar */}
-                  <div className="flex items-center gap-2 rounded-xl border border-[#D4AF37]/55 bg-[#0D0B12]/92 p-1.5 shadow-[0_6px_18px_rgba(0,0,0,0.75)] backdrop-blur-sm">
+                  <div className="flex items-center gap-1.5 rounded-xl border border-[#D4AF37]/55 bg-[#0D0B12]/92 p-1 shadow-[0_6px_18px_rgba(0,0,0,0.75)] backdrop-blur-sm sm:gap-2 sm:p-1.5">
                     <div
-                      className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-[#08070C]"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-[#08070C] sm:h-8 sm:w-8 sm:rounded-lg"
                       style={{ borderColor: selectedCharDef.accentColor }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={CHARACTER_PORTRAIT_URLS[saveData.selectedCharacter]}
                         alt={selectedCharDef.name}
-                        className="h-7 w-7 object-contain [image-rendering:pixelated]"
+                        className="h-5 w-5 object-contain [image-rendering:pixelated] sm:h-7 sm:w-7"
                       />
                     </div>
 
-                    <div className="w-48 sm:w-56">
-                      <div className="flex items-center justify-between px-0.5 font-mono text-[10px] font-extrabold">
-                        <span className="font-serif uppercase tracking-wider text-[#FCA5A5]">
+                    <div className="w-28 sm:w-56">
+                      <div className="flex items-center justify-between px-0.5 font-mono text-[9px] font-extrabold sm:text-[10px]">
+                        <span className="hidden font-serif uppercase tracking-wider text-[#FCA5A5] sm:inline">
                           ♥ Vitality
                         </span>
+                        <span className="text-[#FCA5A5] sm:hidden">♥ HP</span>
                         <span className="text-white">
-                          {hud.hp} / {hud.maxHp} HP
+                          {hud.hp}/{hud.maxHp}
                         </span>
                       </div>
 
-                      <div className="relative mt-0.5 h-4 w-full overflow-hidden rounded-md border border-[#7F1D1D] bg-[#1F090D] p-[1px] shadow-inner">
+                      <div className="relative mt-0.5 h-3 w-full overflow-hidden rounded border border-[#7F1D1D] bg-[#1F090D] p-[1px] shadow-inner sm:h-4 sm:rounded-md">
                         <div
-                          className={`relative h-full rounded-[3px] transition-all duration-150 ${
+                          className={`relative h-full rounded-[2px] transition-all duration-150 sm:rounded-[3px] ${
                             hud.hp / Math.max(1, hud.maxHp) > 0.35
                               ? "bg-gradient-to-r from-[#991B1B] via-[#DC2626] to-[#22C55E]"
                               : "animate-pulse bg-gradient-to-r from-[#7F1D1D] via-[#DC2626] to-[#F87171]"
@@ -4581,9 +4978,7 @@ export default function SurvivorGame() {
                             )}%`,
                           }}
                         >
-                          {/* Glossy Top Bevel */}
                           <div className="absolute inset-x-0 top-0 h-[45%] bg-gradient-to-b from-white/35 to-transparent" />
-                          {/* Subtle Diagonal Blood Texture */}
                           <div
                             className="absolute inset-0 opacity-20"
                             style={{
@@ -4593,7 +4988,6 @@ export default function SurvivorGame() {
                           />
                         </div>
 
-                        {/* Segment Notches */}
                         <div
                           className="pointer-events-none absolute inset-0"
                           style={{
@@ -4604,306 +4998,85 @@ export default function SurvivorGame() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex gap-1.5">
-                    {Array.from({ length: 6 }).map((_, idx) => {
-                      const w = hud.weapons[idx];
-                      const def = w ? WEAPONS[w.id] : null;
-                      return (
-                        <div
-                          key={idx}
-                          className={`relative flex h-11 w-11 items-center justify-center rounded-lg border text-[10px] font-bold shadow ${
-                            w?.evolved
-                              ? "border-[#EF4444] bg-[#EF4444]/25 text-white shadow-[0_0_12px_rgba(239,68,68,0.5)]"
-                              : w
-                                ? "border-[#D4AF37]/60 bg-[#15131B]/90 text-white"
-                                : "border-[#2A2636] bg-[#0B0A0E]/70 text-[#524B69]"
-                          }`}
-                        >
-                          {def && w ? (
-                            <>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={
-                                  w.evolved
-                                    ? WEAPON_EVO_ICON_URLS[w.id]
-                                    : WEAPON_ICON_URLS[w.id]
-                                }
-                                alt={def.name}
-                                className="h-8 w-8 object-contain [image-rendering:pixelated]"
-                              />
-                              <span
-                                className={`absolute bottom-0 right-0.5 rounded px-1 font-mono text-[8px] font-black leading-tight ${
-                                  w.evolved
-                                    ? "bg-[#EF4444] text-white"
-                                    : "bg-[#0B0A0E]/90 text-[#F3C65F]"
-                                }`}
-                              >
-                                {w.evolved ? "★" : `Lv${w.level}`}
-                              </span>
-                            </>
-                          ) : (
-                            <span>—</span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
 
-                  <div className="flex gap-1.5">
-                    {Array.from({ length: 6 }).map((_, idx) => {
-                      const p = hud.passives[idx];
-                      const def = p ? PASSIVES[p.id] : null;
-                      return (
-                        <div
-                          key={idx}
-                          className={`relative flex h-8 w-11 items-center justify-center gap-1 rounded border text-[9px] font-mono font-bold ${
-                            p
-                              ? "border-[#38BDF8]/50 bg-[#15131B]/90 text-[#38BDF8]"
-                              : "border-[#2A2636]/70 bg-[#0B0A0E]/60 text-[#524B69]"
-                          }`}
-                        >
-                          {def && p ? (
-                            <>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={PASSIVE_ICON_URLS[p.id]}
-                                alt={def.name}
-                                className="h-5 w-5 object-contain [image-rendering:pixelated]"
-                              />
-                              <span>{p.level}</span>
-                            </>
-                          ) : (
-                            <span>·</span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Center: Ornate Gothic Survival Chronometer & Boss Milestone */}
-                <div className="relative flex min-w-[184px] flex-col items-center overflow-hidden rounded-xl border border-[#D4AF37]/65 bg-gradient-to-b from-[#181326]/95 via-[#0E0B16]/95 to-[#08070C]/95 px-4 py-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.85),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-md">
-                  {/* Top Ornamental Gold Hairline */}
-                  <div className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#D4AF37] to-transparent" />
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-[#D4AF37]/80">✦</span>
-                    <div className="font-mono text-2xl font-black tracking-[0.14em] text-[#FFFDF9] drop-shadow-[0_2px_8px_rgba(212,175,55,0.35)]">
-                      {formatTime(hud.elapsedSec)}
-                    </div>
-                    <span className="text-[10px] text-[#D4AF37]/80">✦</span>
-                  </div>
-
-                  {/* Next Boss Milestone Label & Mini Progress Track */}
-                  <div className="mt-0.5 flex w-full items-center justify-between gap-2 font-mono text-[9px] font-extrabold uppercase tracking-wider">
-                    <span
-                      className={
-                        hud.isEndlessOvertime
-                          ? "text-[#F87171]"
-                          : hud.activeBoss
-                            ? "animate-pulse text-[#EF4444]"
-                            : "text-[#F3C65F]"
-                      }
-                    >
-                      {hud.isEndlessOvertime
-                        ? "∞ Endless Overtime"
-                        : hud.activeBoss
-                          ? "⚔ Boss Engaged"
-                          : hud.elapsedSec < 90
-                            ? "Next: Goliath"
-                            : hud.elapsedSec < 180
-                              ? "Next: Vespera"
-                              : "Final: Malphas"}
-                    </span>
-                    <span className="text-[#A39E93]">
-                      {hud.isEndlessOvertime
-                        ? "SURVIVE"
-                        : hud.elapsedSec < 90
-                          ? "01:30"
-                          : hud.elapsedSec < 180
-                            ? "03:00"
-                            : "05:00"}
-                    </span>
-                  </div>
-
-                  <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-[#1C162B]">
-                    <div
-                      className={`h-full transition-all duration-300 ${
-                        hud.isEndlessOvertime || hud.activeBoss
-                          ? "bg-gradient-to-r from-[#DC2626] to-[#F59E0B]"
-                          : "bg-gradient-to-r from-[#B48222] via-[#F3C65F] to-[#FFFDF9]"
-                      }`}
-                      style={{
-                        width: `${
-                          hud.isEndlessOvertime
-                            ? 100
-                            : hud.elapsedSec < 90
-                              ? Math.min(100, (hud.elapsedSec / 90) * 100)
-                              : hud.elapsedSec < 180
-                                ? Math.min(100, ((hud.elapsedSec - 90) / 90) * 100)
-                                : Math.min(100, ((hud.elapsedSec - 180) / 120) * 100)
-                        }%`,
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* Right: Ornate Spoils (Kills & Gold), FPS Telemetry & Controls */}
-                <div className="pointer-events-auto flex flex-wrap items-center gap-2">
-                  {/* Unified Gothic Reliquary Bar for Kills, Gold & FPS */}
-                  <div className="relative flex items-center divide-x divide-[#2A233B] overflow-hidden rounded-xl border border-[#D4AF37]/55 bg-[#0D0B14]/92 shadow-[0_6px_18px_rgba(0,0,0,0.75)] backdrop-blur-md">
-                    <div className="pointer-events-none absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-[#D4AF37]/60 to-transparent" />
-
-                    {/* Slain / Kills Counter */}
-                    <div className="flex items-center gap-2 px-3 py-1.5">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#EF4444]/40 bg-[#1A0D14] p-0.5 shadow-inner">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={PASSIVE_ICON_URLS.spinach}
-                          alt="Slain"
-                          className="h-full w-full object-contain [image-rendering:pixelated]"
-                        />
-                      </div>
-                      <div>
-                        <div className="font-serif text-[9px] font-bold uppercase tracking-wider text-[#FCA5A5]">
-                          Slain
-                        </div>
-                        <div className="font-mono text-xs font-black leading-tight text-white">
-                          {hud.kills.toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Sovereign Gold Counter */}
-                    <div className="flex items-center gap-2 px-3 py-1.5">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#D4AF37]/45 bg-[#19140D] p-0.5 shadow-inner">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={PICKUP_ICON_URLS.gold}
-                          alt="Gold"
-                          className="h-full w-full object-contain [image-rendering:pixelated]"
-                        />
-                      </div>
-                      <div>
-                        <div className="font-serif text-[9px] font-bold uppercase tracking-wider text-[#D4AF37]">
-                          Spoils
-                        </div>
-                        <div className="font-mono text-xs font-black leading-tight text-[#F3C65F]">
-                          {hud.goldRun.toLocaleString()} G
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* FPS Telemetry Indicator */}
-                    <div className="flex items-center gap-2 px-3 py-1.5">
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${
-                          hud.fps >= 55
-                            ? "bg-[#4ADE80] shadow-[0_0_8px_#4ADE80]"
-                            : hud.fps >= 35
-                              ? "bg-[#FBBF24] shadow-[0_0_8px_#FBBF24]"
-                              : "bg-[#EF4444] shadow-[0_0_8px_#EF4444]"
-                        }`}
-                      />
-                      <div>
-                        <div className="font-serif text-[9px] font-bold uppercase tracking-wider text-[#A39E93]">
-                          Perf
-                        </div>
-                        <div
-                          className={`font-mono text-xs font-black leading-tight ${
-                            hud.fps >= 55
-                              ? "text-[#4ADE80]"
-                              : hud.fps >= 35
-                                ? "text-[#FBBF24]"
-                                : "text-[#EF4444]"
-                          }`}
-                        >
-                          {hud.fps} <span className="text-[9px] font-bold opacity-80">FPS</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Audio Mixer Popover Button */}
-                  <div className="relative">
-                    <button
-                      onClick={() => setAudioPopoverOpen((prev) => !prev)}
-                      title="Audio Mixer (Music & SFX Volume)"
-                      className={`flex h-10 w-10 items-center justify-center rounded-xl border transition-all ${
-                        muted
-                          ? "border-[#EF4444]/50 bg-[#1A0D12]/90 text-[#FCA5A5] hover:border-[#EF4444]"
-                          : "border-[#D4AF37]/50 bg-[#120F1B]/90 text-[#F3C65F] hover:border-[#D4AF37] hover:bg-[#1B1628]"
-                      } shadow-[0_6px_18px_rgba(0,0,0,0.75)] backdrop-blur-md`}
-                    >
-                      <span className="text-sm">{muted ? "🔇" : "🔊"}</span>
-                    </button>
-
-                    {audioPopoverOpen && (
-                      <div className=" absolute right-0 top-12 z-30 w-56 rounded-xl border border-[#D4AF37]/60 bg-[#0E0B16]/95 p-3.5 shadow-[0_12px_30px_rgba(0,0,0,0.9)] backdrop-blur-md">
-                        <div className="flex items-center justify-between border-b border-[#262134] pb-2">
-                          <span className="font-serif text-[11px] font-bold uppercase tracking-wider text-[#F3C65F]">
-                            ✦ Audio Mixer
-                          </span>
-                          <button
-                            onClick={toggleMute}
-                            className={`rounded px-2 py-0.5 font-mono text-[10px] font-bold ${
-                              muted
-                                ? "bg-[#EF4444]/25 text-[#FCA5A5]"
-                                : "bg-[#262134] text-[#EAE6DF] hover:text-white"
+                  {/* Equipped Weapons (6) & Passives (6) */}
+                  <div className="flex flex-col gap-1 sm:gap-1.5">
+                    <div className="flex gap-1 sm:gap-1.5">
+                      {Array.from({ length: 6 }).map((_, idx) => {
+                        const w = hud.weapons[idx];
+                        const def = w ? WEAPONS[w.id] : null;
+                        return (
+                          <div
+                            key={idx}
+                            className={`relative flex h-7 w-7 items-center justify-center rounded-md border text-[9px] font-bold shadow sm:h-11 sm:w-11 sm:rounded-lg sm:text-[10px] ${
+                              w?.evolved
+                                ? "border-[#EF4444] bg-[#EF4444]/25 text-white shadow-[0_0_12px_rgba(239,68,68,0.5)]"
+                                : w
+                                  ? "border-[#D4AF37]/60 bg-[#15131B]/90 text-white"
+                                  : "border-[#2A2636] bg-[#0B0A0E]/70 text-[#524B69]"
                             }`}
                           >
-                            {muted ? "Unmute" : "Mute All"}
-                          </button>
-                        </div>
-
-                        <div className="mt-3 space-y-2.5 font-mono text-[11px]">
-                          <div>
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-[#BAE6FD]">🎵 Music Volume</span>
-                              <span className="text-white">{muted ? 0 : musicVol}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              min={0}
-                              max={100}
-                              value={muted ? 0 : musicVol}
-                              onChange={(e) => handleMusicVolChange(Number(e.target.value))}
-                              className="mt-1 h-1.5 w-full cursor-pointer accent-[#38BDF8]"
-                            />
+                            {def && w ? (
+                              <>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={
+                                    w.evolved
+                                      ? WEAPON_EVO_ICON_URLS[w.id]
+                                      : WEAPON_ICON_URLS[w.id]
+                                  }
+                                  alt={def.name}
+                                  className="h-5 w-5 object-contain [image-rendering:pixelated] sm:h-8 sm:w-8"
+                                />
+                                <span
+                                  className={`absolute bottom-0 right-0 rounded px-0.5 font-mono text-[7px] font-black leading-tight sm:right-0.5 sm:px-1 sm:text-[8px] ${
+                                    w.evolved
+                                      ? "bg-[#EF4444] text-white"
+                                      : "bg-[#0B0A0E]/90 text-[#F3C65F]"
+                                  }`}
+                                >
+                                  {w.evolved ? "★" : `L${w.level}`}
+                                </span>
+                              </>
+                            ) : (
+                              <span>—</span>
+                            )}
                           </div>
+                        );
+                      })}
+                    </div>
 
-                          <div>
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold text-[#F3C65F]">⚔️ SFX Volume</span>
-                              <span className="text-white">{muted ? 0 : sfxVol}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              min={0}
-                              max={100}
-                              value={muted ? 0 : sfxVol}
-                              onChange={(e) => handleSfxVolChange(Number(e.target.value))}
-                              className="mt-1 h-1.5 w-full cursor-pointer accent-[#F3C65F]"
-                            />
+                    <div className="flex gap-1 sm:gap-1.5">
+                      {Array.from({ length: 6 }).map((_, idx) => {
+                        const p = hud.passives[idx];
+                        const def = p ? PASSIVES[p.id] : null;
+                        return (
+                          <div
+                            key={idx}
+                            className={`relative flex h-5 w-7 items-center justify-center gap-0.5 rounded border text-[8px] font-mono font-bold sm:h-8 sm:w-11 sm:gap-1 sm:text-[9px] ${
+                              p
+                                ? "border-[#38BDF8]/50 bg-[#15131B]/90 text-[#38BDF8]"
+                                : "border-[#2A2636]/70 bg-[#0B0A0E]/60 text-[#524B69]"
+                            }`}
+                          >
+                            {def && p ? (
+                              <>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  src={PASSIVE_ICON_URLS[p.id]}
+                                  alt={def.name}
+                                  className="h-3.5 w-3.5 object-contain [image-rendering:pixelated] sm:h-5 sm:w-5"
+                                />
+                                <span>{p.level}</span>
+                              </>
+                            ) : (
+                              <span>·</span>
+                            )}
                           </div>
-                        </div>
-                      </div>
-                    )}
+                        );
+                      })}
+                    </div>
                   </div>
-
-                  {/* Pause Button */}
-                  <button
-                    onClick={() => {
-                      const st = engineRef.current;
-                      if (!st) return;
-                      st.paused = true;
-                      setPauseModalOpen(true);
-                    }}
-                    className="flex h-10 items-center gap-1.5 rounded-xl border border-[#D4AF37]/55 bg-gradient-to-b from-[#1D172B]/95 to-[#0E0B16]/95 px-3.5 font-serif text-xs font-bold uppercase tracking-wider text-[#FFFDF9] shadow-[0_6px_18px_rgba(0,0,0,0.75)] backdrop-blur-md transition-all hover:border-[#F3C65F] hover:text-[#F3C65F]"
-                  >
-                    <span className="font-mono text-[10px] text-[#F3C65F]">⏸</span>
-                    <span>Pause</span>
-                  </button>
                 </div>
               </div>
 

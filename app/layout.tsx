@@ -22,6 +22,11 @@ export const metadata: Metadata = {
   title: "Sovereign Survivors — Dark Fantasy Roguelike Survival",
   description:
     "Fast-paced Dark Fantasy Horde Survival Roguelike with Red-Star Weapon Evolutions, Arena Boss Fights, and Altar Progression.",
+  icons: {
+    icon: "/logo/logo-icon.png",
+    shortcut: "/logo/logo-icon.png",
+    apple: "/logo/logo-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
