@@ -85,10 +85,17 @@ interface EngineState {
   xpToNext: number;
   level: number;
   pendingLevelUps: number;
+  rerollsLeft: number;
+  banishesLeft: number;
+  banishedWeapons: Set<WeaponId>;
+  banishedPassives: Set<PassiveId>;
 
   elapsedSec: number;
   kills: number;
   goldRun: number;
+  bankedGold: number;
+  bankedKills: number;
+  runCounted: boolean;
   totalDamageDealt: Record<WeaponId, number>;
 
   weapons: EquippedWeaponState[];
@@ -313,7 +320,7 @@ const PASSIVE_ICON_URLS: Record<PassiveId, string> = {
   spinach: "/item/icon-spinach.png",
 };
 
-type SpritePickupKind = Exclude<PickupKind, "chest">;
+type SpritePickupKind = PickupKind;
 
 const SPRITE_PICKUP_KINDS: SpritePickupKind[] = [
   "xp_blue",
@@ -323,6 +330,7 @@ const SPRITE_PICKUP_KINDS: SpritePickupKind[] = [
   "meat",
   "magnet",
   "rosary",
+  "chest",
 ];
 
 const PICKUP_ICON_URLS: Record<SpritePickupKind, string> = {
@@ -333,6 +341,7 @@ const PICKUP_ICON_URLS: Record<SpritePickupKind, string> = {
   meat: "/item/icon-meat.png",
   magnet: "/item/icon-magnet.png",
   rosary: "/item/icon-rosary.png",
+  chest: "/item/war-chest.png",
 };
 
 const WEAPON_SPRITE_FRAMES: Record<WeaponId, readonly SpriteFrameBox[]> = {
@@ -501,6 +510,15 @@ export default function SurvivorGame() {
   });
 
   const [levelUpChoices, setLevelUpChoices] = useState<UpgradeChoiceCard[] | null>(null);
+  const [draftMeta, setDraftMeta] = useState<{
+    rerollsLeft: number;
+    banishesLeft: number;
+    banishMode: boolean;
+  }>({
+    rerollsLeft: 2,
+    banishesLeft: 2,
+    banishMode: false,
+  });
   const [chestReward, setChestReward] = useState<BossChestReward | null>(null);
   const [pauseModalOpen, setPauseModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
@@ -623,6 +641,7 @@ export default function SurvivorGame() {
   }, []);
   const joystickRef = useRef<{
     active: boolean;
+    pointerId: number | null;
     originX: number;
     originY: number;
     currentX: number;
@@ -631,6 +650,7 @@ export default function SurvivorGame() {
     dy: number;
   }>({
     active: false,
+    pointerId: null,
     originX: 0,
     originY: 0,
     currentX: 0,
@@ -641,11 +661,44 @@ export default function SurvivorGame() {
 
   const updateSave = useCallback((updater: (prev: MetaSaveData) => MetaSaveData) => {
     setSaveData((prev) => {
-      const next = updater(prev);
+      const safePrev: MetaSaveData = {
+        ...prev,
+        gold: Number.isFinite(prev.gold) ? prev.gold : 120,
+        bestTimeSec: Number.isFinite(prev.bestTimeSec) ? prev.bestTimeSec : 0,
+        totalKills: Number.isFinite(prev.totalKills) ? prev.totalKills : 0,
+        totalRuns: Number.isFinite(prev.totalRuns) ? prev.totalRuns : 0,
+      };
+      const rawNext = updater(safePrev);
+      const next: MetaSaveData = {
+        ...rawNext,
+        gold: Number.isFinite(rawNext.gold) ? Math.max(0, Math.round(rawNext.gold)) : safePrev.gold,
+        bestTimeSec: Number.isFinite(rawNext.bestTimeSec)
+          ? Math.max(0, Math.floor(rawNext.bestTimeSec))
+          : safePrev.bestTimeSec,
+        totalKills: Number.isFinite(rawNext.totalKills)
+          ? Math.max(0, Math.round(rawNext.totalKills))
+          : safePrev.totalKills,
+        totalRuns: Number.isFinite(rawNext.totalRuns)
+          ? Math.max(0, Math.round(rawNext.totalRuns))
+          : safePrev.totalRuns,
+      };
       saveMetaProgress(next);
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    if (
+      !Number.isFinite(saveData.gold) ||
+      !Number.isFinite(saveData.totalKills) ||
+      !Number.isFinite(saveData.bestTimeSec) ||
+      !Number.isFinite(saveData.totalRuns)
+    ) {
+      const recovered = loadSaveData();
+      setSaveData(recovered);
+      saveMetaProgress(recovered);
+    }
+  }, [saveData]);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -730,7 +783,7 @@ export default function SurvivorGame() {
       const areaMul =
         charDef.bonuses.areaMul *
         (1 + (meta.upgrades.area || 0) * 0.05) *
-        (1 + pSpellbinder * 0.12);
+        (1 + pSpellbinder * 0.08);
 
       const magnetRadius =
         95 *
@@ -813,7 +866,11 @@ export default function SurvivorGame() {
     }
 
     // 2. Active Weapons (upgrade existing or unlock new if < 6 slots)
+    const banishedWpns = st.banishedWeapons || new Set<WeaponId>();
+    const banishedPas = st.banishedPassives || new Set<PassiveId>();
+
     for (const wId of WEAPON_IDS) {
+      if (banishedWpns.has(wId)) continue;
       const def = WEAPONS[wId];
       const existing = equippedWeaponMap.get(wId);
       const pairedPassiveDef = PASSIVES[def.pairedPassiveId];
@@ -862,6 +919,7 @@ export default function SurvivorGame() {
 
     // 3. Passive Supplies (upgrade existing < 5 or unlock new if < 6 slots)
     for (const pId of PASSIVE_IDS) {
+      if (banishedPas.has(pId)) continue;
       const pDef = PASSIVES[pId];
       const currentLv = st.passives[pId] || 0;
       const pairedWeapon = equippedWeaponMap.get(pDef.pairedWeaponId);
@@ -1001,14 +1059,100 @@ export default function SurvivorGame() {
       }
 
       if (st.pendingLevelUps > 0) {
+        setDraftMeta({
+          rerollsLeft: st.rerollsLeft ?? 0,
+          banishesLeft: st.banishesLeft ?? 0,
+          banishMode: false,
+        });
         setLevelUpChoices(generateUpgradeChoices(st));
       } else {
+        setDraftMeta((prev) => ({ ...prev, banishMode: false }));
         setLevelUpChoices(null);
         st.paused = false;
       }
     },
     [computePlayerStats, generateUpgradeChoices, saveData]
   );
+
+  const handleRerollChoices = useCallback(() => {
+    const st = engineRef.current;
+    if (!st || (st.rerollsLeft ?? 0) <= 0) return;
+    st.rerollsLeft = (st.rerollsLeft ?? 0) - 1;
+    soundFX.playLevelUp();
+    setDraftMeta({
+      rerollsLeft: st.rerollsLeft,
+      banishesLeft: st.banishesLeft ?? 0,
+      banishMode: false,
+    });
+    setLevelUpChoices(generateUpgradeChoices(st));
+  }, [generateUpgradeChoices]);
+
+  const handleBanishCard = useCallback(
+    (card: UpgradeChoiceCard) => {
+      const st = engineRef.current;
+      if (!st || (st.banishesLeft ?? 0) <= 0) return;
+      if (card.isEvolution || card.kind === "consumable") return;
+
+      if (!st.banishedWeapons) st.banishedWeapons = new Set<WeaponId>();
+      if (!st.banishedPassives) st.banishedPassives = new Set<PassiveId>();
+
+      if (card.kind === "weapon" && card.weaponId) {
+        st.banishedWeapons.add(card.weaponId);
+      } else if (card.kind === "passive" && card.passiveId) {
+        st.banishedPassives.add(card.passiveId);
+      }
+
+      st.banishesLeft = (st.banishesLeft ?? 0) - 1;
+      soundFX.playPlayerHurt();
+
+      if (st.pendingLevelUps > 0) {
+        st.pendingLevelUps -= 1;
+      }
+
+      if (st.pendingLevelUps > 0) {
+        setDraftMeta({
+          rerollsLeft: st.rerollsLeft ?? 0,
+          banishesLeft: st.banishesLeft,
+          banishMode: false,
+        });
+        setLevelUpChoices(generateUpgradeChoices(st));
+      } else {
+        setDraftMeta({
+          rerollsLeft: st.rerollsLeft ?? 0,
+          banishesLeft: st.banishesLeft,
+          banishMode: false,
+        });
+        setLevelUpChoices(null);
+        st.paused = false;
+      }
+    },
+    [generateUpgradeChoices]
+  );
+
+  const handleSkipLevelUp = useCallback(() => {
+    const st = engineRef.current;
+    if (!st) return;
+    st.goldRun += 15;
+    st.hp = Math.min(st.maxHp, st.hp + Math.round(st.maxHp * 0.2));
+    soundFX.playXpGem();
+
+    if (st.pendingLevelUps > 0) {
+      st.pendingLevelUps -= 1;
+    }
+
+    if (st.pendingLevelUps > 0) {
+      setDraftMeta({
+        rerollsLeft: st.rerollsLeft ?? 0,
+        banishesLeft: st.banishesLeft ?? 0,
+        banishMode: false,
+      });
+      setLevelUpChoices(generateUpgradeChoices(st));
+    } else {
+      setDraftMeta((prev) => ({ ...prev, banishMode: false }));
+      setLevelUpChoices(null);
+      st.paused = false;
+    }
+  }, [generateUpgradeChoices]);
 
   // Start a new run
   const startNewRun = useCallback(
@@ -1054,9 +1198,16 @@ export default function SurvivorGame() {
         xpToNext: 12,
         level: 1,
         pendingLevelUps: 0,
+        rerollsLeft: 2,
+        banishesLeft: 2,
+        banishedWeapons: new Set<WeaponId>(),
+        banishedPassives: new Set<PassiveId>(),
         elapsedSec: 0,
         kills: 0,
         goldRun: 0,
+        bankedGold: 0,
+        bankedKills: 0,
+        runCounted: false,
         totalDamageDealt: {
           wand: 0,
           dagger: 0,
@@ -1118,15 +1269,33 @@ export default function SurvivorGame() {
       st.paused = true;
       st.gameOver = true;
 
+      // Release any active mobile virtual joystick pointer state
+      joystickRef.current.active = false;
+      joystickRef.current.pointerId = null;
+      joystickRef.current.dx = 0;
+      joystickRef.current.dy = 0;
+
       const goldBonus = outcome === "victory" ? 250 : 0;
-      const totalGoldEarned = st.goldRun + goldBonus;
+      const safeGoldRun = Number.isFinite(st.goldRun) ? st.goldRun : 0;
+      const safeKills = Number.isFinite(st.kills) ? st.kills : 0;
+      const prevBankedGold = Number.isFinite(st.bankedGold) ? st.bankedGold : 0;
+      const prevBankedKills = Number.isFinite(st.bankedKills) ? st.bankedKills : 0;
+
+      const totalGoldEarned = safeGoldRun + (st.victoryTriggered ? 250 : goldBonus);
+      const unbankedGold = Math.max(0, totalGoldEarned - prevBankedGold);
+      const unbankedKills = Math.max(0, safeKills - prevBankedKills);
+      const runIncrement = st.runCounted ? 0 : 1;
+
+      st.bankedGold = totalGoldEarned;
+      st.bankedKills = safeKills;
+      st.runCounted = true;
 
       updateSave((prev) => ({
         ...prev,
-        gold: prev.gold + totalGoldEarned,
+        gold: prev.gold + unbankedGold,
         bestTimeSec: Math.max(prev.bestTimeSec, Math.floor(st.elapsedSec)),
-        totalKills: prev.totalKills + st.kills,
-        totalRuns: prev.totalRuns + 1,
+        totalKills: prev.totalKills + unbankedKills,
+        totalRuns: prev.totalRuns + runIncrement,
       }));
 
       const breakdown = st.weapons.map((w) => ({
@@ -1155,7 +1324,15 @@ export default function SurvivorGame() {
     st.gameOver = false;
     st.paused = false;
     st.hp = st.maxHp;
+    st.invulnTimer = Math.max(st.invulnTimer, 2.5);
+    st.arenaBarrier = null;
+    st.enemies = st.enemies.filter((e) => e.hp > 0);
+    st.nextEndlessBossTime = Math.max(
+      st.nextEndlessBossTime,
+      Math.floor(st.elapsedSec) + 60
+    );
     setEndModal(null);
+    setPauseModalOpen(false);
     soundFX.playEvolution();
   }, []);
 
@@ -1211,22 +1388,50 @@ export default function SurvivorGame() {
 
       if (screen !== "playing") return;
 
-      // Card selection via 1, 2, 3 keys
+      // Card selection via 1, 2, 3 keys + Reroll [R] / Banish [B] / Skip [S]
       if (levelUpChoices && levelUpChoices.length > 0) {
         if (key === "1" && levelUpChoices[0]) {
-          applyUpgradeChoice(levelUpChoices[0]);
+          if (draftMeta.banishMode) {
+            handleBanishCard(levelUpChoices[0]);
+          } else {
+            applyUpgradeChoice(levelUpChoices[0]);
+          }
         } else if (key === "2" && levelUpChoices[1]) {
-          applyUpgradeChoice(levelUpChoices[1]);
+          if (draftMeta.banishMode) {
+            handleBanishCard(levelUpChoices[1]);
+          } else {
+            applyUpgradeChoice(levelUpChoices[1]);
+          }
         } else if (key === "3" && levelUpChoices[2]) {
-          applyUpgradeChoice(levelUpChoices[2]);
+          if (draftMeta.banishMode) {
+            handleBanishCard(levelUpChoices[2]);
+          } else {
+            applyUpgradeChoice(levelUpChoices[2]);
+          }
+        } else if (key === "r") {
+          handleRerollChoices();
+        } else if (key === "b") {
+          if (draftMeta.banishesLeft > 0) {
+            setDraftMeta((prev) => ({ ...prev, banishMode: !prev.banishMode }));
+          }
+        } else if (key === "s") {
+          handleSkipLevelUp();
         }
+        return;
+      }
+
+      if (endModal && endModal.outcome === "victory" && (key === " " || key === "enter")) {
+        e.preventDefault();
+        continueIntoEndlessMode();
         return;
       }
 
       if (chestReward && (key === " " || key === "enter")) {
         e.preventDefault();
         setChestReward(null);
-        if (engineRef.current) engineRef.current.paused = false;
+        if (engineRef.current && !engineRef.current.gameOver) {
+          engineRef.current.paused = false;
+        }
         return;
       }
 
@@ -1264,7 +1469,13 @@ export default function SurvivorGame() {
   }, [
     applyUpgradeChoice,
     chestReward,
+    continueIntoEndlessMode,
+    draftMeta.banishMode,
+    draftMeta.banishesLeft,
     endModal,
+    handleBanishCard,
+    handleRerollChoices,
+    handleSkipLevelUp,
     levelUpChoices,
     pauseModalOpen,
     screen,
@@ -1345,9 +1556,10 @@ export default function SurvivorGame() {
         (st.elapsedSec > 210 ? Math.pow((st.elapsedSec - 210) / 55, 1.5) : 0);
       const timeScale =
         1 +
-        st.elapsedSec / 78 +
-        lateSurge +
-        (st.endlessMode ? (st.elapsedSec - 300) / 32 : 0);
+        (st.elapsedSec / 78 +
+          lateSurge +
+          (st.endlessMode ? (st.elapsedSec - 300) / 32 : 0)) *
+          0.5;
       const speedScale = 1 + Math.min(0.28, st.elapsedSec * 0.00085);
 
       let name = "Decaying Skeleton";
@@ -1356,7 +1568,7 @@ export default function SurvivorGame() {
       let speed = 68 * speedScale;
       let damage = 12;
       let xpValue = 3;
-      let goldChance = 0.14;
+      let goldChance = 0.07;
       let isBoss = false;
       let isMiniBoss = false;
       let color = "#CBD5E1";
@@ -1368,7 +1580,7 @@ export default function SurvivorGame() {
         speed = 102 * speedScale;
         damage = 9;
         xpValue = 2;
-        goldChance = 0.09;
+        goldChance = 0.045;
         color = "#A855F7";
       } else if (kind === "ghoul") {
         name = "Plague Ghoul";
@@ -1377,7 +1589,7 @@ export default function SurvivorGame() {
         speed = 90 * speedScale;
         damage = 16;
         xpValue = 5;
-        goldChance = 0.2;
+        goldChance = 0.1;
         color = "#4ADE80";
       } else if (kind === "knight") {
         name = "Dread Knight";
@@ -1386,7 +1598,7 @@ export default function SurvivorGame() {
         speed = 58 * speedScale;
         damage = 24;
         xpValue = 12;
-        goldChance = 0.34;
+        goldChance = 0.17;
         color = "#64748B";
       } else if (kind === "wraith") {
         name = "Abyssal Wraith";
@@ -1395,12 +1607,12 @@ export default function SurvivorGame() {
         speed = 95 * speedScale;
         damage = 21;
         xpValue = 9;
-        goldChance = 0.28;
+        goldChance = 0.14;
         color = "#38BDF8";
       } else if (kind === "miniboss_goliath") {
         name = "Bone Goliath";
         radius = 52;
-        hp = 6200 * Math.max(1, timeScale * 0.85);
+        hp = 4340 * Math.max(1, timeScale * 0.85);
         speed = 70;
         damage = 30;
         xpValue = 65;
@@ -1410,7 +1622,7 @@ export default function SurvivorGame() {
       } else if (kind === "miniboss_necromancer") {
         name = "Arch-Lich Vespera";
         radius = 48;
-        hp = 13500 * Math.max(1, timeScale * 0.9);
+        hp = 9450 * Math.max(1, timeScale * 0.9);
         speed = 66;
         damage = 35;
         xpValue = 110;
@@ -1420,7 +1632,7 @@ export default function SurvivorGame() {
       } else if (kind === "boss_malphas") {
         name = "Malphas, The Dread Lord";
         radius = 64;
-        hp = 36500 * (st.endlessMode ? timeScale * 0.85 : 1);
+        hp = 25550 * (st.endlessMode ? timeScale * 0.85 : 1);
         speed = 82;
         damage = 44;
         xpValue = 250;
@@ -1528,6 +1740,7 @@ export default function SurvivorGame() {
 
       const bonusGold = 130 + Math.floor(Math.random() * 65);
       st.goldRun += bonusGold;
+      st.rerollsLeft = (st.rerollsLeft ?? 0) + 1;
       st.hp = Math.min(st.maxHp, st.hp + Math.round(st.maxHp * 0.25));
 
       if (rewardItems.length === 0) {
@@ -1693,6 +1906,7 @@ export default function SurvivorGame() {
 
           if (enemy.isBoss && !st.victoryTriggered && !st.endlessMode) {
             st.victoryTriggered = true;
+            st.enemies = st.enemies.filter((e) => e.hp > 0);
             concludeRun("victory");
           }
         }
@@ -1910,7 +2124,7 @@ export default function SurvivorGame() {
         // Continuous Cleaving Greatswords: Sanctified Greatsword / Solaris Excalibur (bible)
         if (w.id === "bible") {
           const orbitRadius = lvStat.area * stats.areaMul;
-          const swordHitRadius = (w.evolved ? 28 : 24) * stats.areaMul;
+          const swordHitRadius = (w.evolved ? 32 : 28) * stats.areaMul;
           for (let i = 0; i < totalCount; i++) {
             const ang =
               st.bibleOrbitAngle * lvStat.speed + (Math.PI * 2 * i) / totalCount;
@@ -2118,8 +2332,11 @@ export default function SurvivorGame() {
         }
       };
 
+      if (st.gameOver || st.paused) return;
+
       // 4. Update Projectiles & Collisions
       for (let i = st.projectiles.length - 1; i >= 0; i--) {
+        if (st.gameOver || st.paused) return;
         const p = st.projectiles[i];
         p.x += p.vx * dt;
         p.y += p.vy * dt;
@@ -2205,8 +2422,11 @@ export default function SurvivorGame() {
         if (destroyed) continue;
       }
 
+      if (st.gameOver || st.paused) return;
+
       // 5. Update Ground Hazards (Magma / Thunder Loop Static)
       for (let i = st.hazards.length - 1; i >= 0; i--) {
+        if (st.gameOver || st.paused) return;
         const hz = st.hazards[i];
         hz.ttl -= dt;
         hz.tickTimer -= dt;
@@ -2533,6 +2753,11 @@ export default function SurvivorGame() {
       if (st.pendingLevelUps > 0 && !st.paused) {
         st.paused = true;
         soundFX.playLevelUp();
+        setDraftMeta({
+          rerollsLeft: st.rerollsLeft ?? 2,
+          banishesLeft: st.banishesLeft ?? 2,
+          banishMode: false,
+        });
         setLevelUpChoices(generateUpgradeChoices(st));
         return;
       }
@@ -2720,8 +2945,7 @@ export default function SurvivorGame() {
 
           ctx.save();
           ctx.translate(px, py);
-          ctx.rotate(st.elapsedSec * 0.9);
-          ctx.globalAlpha = garlicWpn.evolved ? 0.85 : 0.78;
+          ctx.globalAlpha = 0.5;
           ctx.imageSmoothingEnabled = false;
           ctx.drawImage(
             garlicImg,
@@ -2767,11 +2991,19 @@ export default function SurvivorGame() {
           pk.y - camY + Math.sin(st.elapsedSec * 5 + pk.bobOffset) * 2.5;
         if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
 
-        if (pk.kind !== "chest") {
-          const pkImg = pickupImagesRef.current[pk.kind];
-          if (pkImg) {
-            const drawSize =
-              pk.kind === "xp_blue"
+        const pkImg = pickupImagesRef.current[pk.kind];
+        if (pkImg) {
+          if (pk.kind === "chest") {
+            ctx.fillStyle = "rgba(251, 191, 36, 0.24)";
+            ctx.beginPath();
+            ctx.arc(sx, sy, 28 + Math.sin(st.elapsedSec * 7) * 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          const drawSize =
+            pk.kind === "chest"
+              ? 54
+              : pk.kind === "xp_blue"
                 ? 24
                 : pk.kind === "xp_emerald"
                   ? 27
@@ -2781,28 +3013,27 @@ export default function SurvivorGame() {
                       ? 25
                       : 34;
 
-            ctx.fillStyle = "rgba(0, 0, 0, 0.38)";
-            ctx.beginPath();
-            ctx.ellipse(
-              sx,
-              pk.y - camY + drawSize * 0.34,
-              drawSize * 0.32,
-              drawSize * 0.14,
-              0,
-              0,
-              Math.PI * 2
-            );
-            ctx.fill();
+          ctx.fillStyle = "rgba(0, 0, 0, 0.38)";
+          ctx.beginPath();
+          ctx.ellipse(
+            sx,
+            pk.y - camY + drawSize * 0.34,
+            drawSize * 0.32,
+            drawSize * 0.14,
+            0,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
 
-            ctx.drawImage(
-              pkImg,
-              sx - drawSize / 2,
-              sy - drawSize / 2,
-              drawSize,
-              drawSize
-            );
-            continue;
-          }
+          ctx.drawImage(
+            pkImg,
+            sx - drawSize / 2,
+            sy - drawSize / 2,
+            drawSize,
+            drawSize
+          );
+          continue;
         }
 
         if (
@@ -3394,7 +3625,146 @@ export default function SurvivorGame() {
       }
       ctx.globalAlpha = 1;
 
-      // 12. Virtual Joystick Overlay when dragging
+      // 12. Off-Screen Target Pointers (War Chests, Bosses, Soul Magnet & Holy Rosary)
+      const offscreenTargets: {
+        x: number;
+        y: number;
+        color: string;
+        label: string;
+        iconKind?: SpritePickupKind;
+        isBoss?: boolean;
+      }[] = [];
+
+      for (const pk of st.pickups) {
+        if (pk.kind === "chest") {
+          offscreenTargets.push({
+            x: pk.x,
+            y: pk.y,
+            color: "#FBBF24",
+            label: "CHEST",
+            iconKind: "chest",
+          });
+        } else if (pk.kind === "magnet") {
+          offscreenTargets.push({
+            x: pk.x,
+            y: pk.y,
+            color: "#38BDF8",
+            label: "MAGNET",
+            iconKind: "magnet",
+          });
+        } else if (pk.kind === "rosary") {
+          offscreenTargets.push({
+            x: pk.x,
+            y: pk.y,
+            color: "#FDE047",
+            label: "ROSARY",
+            iconKind: "rosary",
+          });
+        }
+      }
+
+      for (const e of st.enemies) {
+        if (e.isBoss || e.isMiniBoss) {
+          offscreenTargets.push({
+            x: e.x,
+            y: e.y,
+            color: e.isBoss ? "#EF4444" : "#F59E0B",
+            label: e.isBoss ? "BOSS" : "ELITE",
+            isBoss: true,
+          });
+        }
+      }
+
+      for (const tgt of offscreenTargets) {
+        const sx = tgt.x - camX;
+        const sy = tgt.y - camY;
+        const pad = 28;
+        if (sx >= pad && sx <= W - pad && sy >= pad && sy <= H - pad) {
+          continue;
+        }
+
+        const dx = tgt.x - st.playerX;
+        const dy = tgt.y - st.playerY;
+        const distPx = Math.hypot(dx, dy);
+        const distMeters = Math.max(1, Math.round(distPx / 32));
+        const ang = Math.atan2(dy, dx);
+
+        // Clamp indicator onto screen inset box (avoiding top HUD and bottom edges)
+        const minX = 48;
+        const maxX = W - 48;
+        const minY = 126;
+        const maxY = H - 72;
+        const cx = W / 2;
+        const cy = H / 2;
+        const cosA = Math.cos(ang);
+        const sinA = Math.sin(ang);
+
+        const tx =
+          cosA > 0.0001
+            ? (maxX - cx) / cosA
+            : cosA < -0.0001
+              ? (minX - cx) / cosA
+              : Infinity;
+        const ty =
+          sinA > 0.0001
+            ? (maxY - cy) / sinA
+            : sinA < -0.0001
+              ? (minY - cy) / sinA
+              : Infinity;
+        const t = Math.min(Math.abs(tx), Math.abs(ty));
+        const ix = Math.max(minX, Math.min(maxX, cx + cosA * t));
+        const iy = Math.max(minY, Math.min(maxY, cy + sinA * t));
+
+        const pulse = 1 + Math.sin(st.elapsedSec * 7) * 0.08;
+
+        ctx.save();
+        ctx.translate(ix, iy);
+
+        // Directional Arrowhead pointing outward toward target
+        ctx.save();
+        ctx.rotate(ang);
+        ctx.fillStyle = tgt.color;
+        ctx.beginPath();
+        ctx.moveTo(26 * pulse, 0);
+        ctx.lineTo(14, -7);
+        ctx.lineTo(14, 7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // Ornate Dark Medallion Frame
+        ctx.fillStyle = "rgba(11, 9, 16, 0.92)";
+        ctx.beginPath();
+        ctx.arc(0, 0, 16, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = tgt.color;
+        ctx.stroke();
+
+        // Icon or Boss Skull inside Medallion
+        if (tgt.iconKind && pickupImagesRef.current[tgt.iconKind]) {
+          const iconImg = pickupImagesRef.current[tgt.iconKind]!;
+          ctx.drawImage(iconImg, -11, -11, 22, 22);
+        } else {
+          ctx.font = "900 13px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = tgt.color;
+          ctx.fillText(tgt.isBoss ? "💀" : "★", 0, 1);
+        }
+
+        // Distance label below medallion
+        ctx.font = "800 10px var(--font-geist-mono), monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#000000";
+        ctx.fillText(`${ tgt.label } ${ distMeters }m`, 1, 27);
+        ctx.fillStyle = tgt.color;
+        ctx.fillText(`${ tgt.label } ${ distMeters }m`, 0, 26);
+
+        ctx.restore();
+      }
+
+      // 13. Virtual Joystick Overlay when dragging
       if (joystickRef.current.active) {
         const j = joystickRef.current;
         ctx.save();
@@ -3474,11 +3844,20 @@ export default function SurvivorGame() {
     return () => cancelAnimationFrame(animId);
   }, [computePlayerStats, concludeRun, generateUpgradeChoices, saveData, screen]);
 
-  // Pointer handlers for Virtual Joystick
+  // Pointer handlers for Virtual Joystick (Multi-Touch safe via pointerId tracking)
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0 && e.pointerType === "mouse") return;
+    if (joystickRef.current.active && joystickRef.current.pointerId !== null) {
+      return;
+    }
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore if pointer capture is unavailable
+    }
     joystickRef.current = {
       active: true,
+      pointerId: e.pointerId,
       originX: e.clientX,
       originY: e.clientY,
       currentX: e.clientX,
@@ -3489,8 +3868,8 @@ export default function SurvivorGame() {
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!joystickRef.current.active) return;
     const j = joystickRef.current;
+    if (!j.active || j.pointerId !== e.pointerId) return;
     const rawDx = e.clientX - j.originX;
     const rawDy = e.clientY - j.originY;
     const dist = Math.hypot(rawDx, rawDy);
@@ -3504,8 +3883,22 @@ export default function SurvivorGame() {
     j.dy = dist > 4 ? (rawDy / Math.max(1, dist)) * (clampedDist / maxR) : 0;
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (
+      joystickRef.current.pointerId !== null &&
+      e.pointerId !== joystickRef.current.pointerId
+    ) {
+      return;
+    }
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore
+    }
     joystickRef.current.active = false;
+    joystickRef.current.pointerId = null;
     joystickRef.current.dx = 0;
     joystickRef.current.dy = 0;
   };
@@ -4500,7 +4893,7 @@ export default function SurvivorGame() {
                   <span className="text-[#D4AF37]">✦</span>
                   <span>Sovereign Survivors</span>
                   <span className="rounded-md border border-[#D4AF37]/30 bg-[#1A1424]/90 px-2 py-0.5 font-mono text-[10px] font-semibold lowercase tracking-normal text-[#F3C65F]">
-                    v0.1.0-alpha
+                    v0.2.0-alpha
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -5132,9 +5525,19 @@ export default function SurvivorGame() {
           {/* Bottom-Right Interactive Dash Button & Cooldown HUD */}
           <div className="pointer-events-auto absolute bottom-5 right-5 z-20">
             <button
+              type="button"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                triggerDash();
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                triggerDash();
+              }}
               onClick={triggerDash}
               disabled={hud.dashCooldown > 0}
-              className={`relative flex items-center gap-3 overflow-hidden rounded-2xl border-2 px-4 py-3 font-mono transition-all ${
+              className={`relative flex touch-none select-none items-center gap-3 overflow-hidden rounded-2xl border-2 px-4 py-3 font-mono transition-all ${
                 hud.dashCooldown <= 0
                   ? "border-[#38BDF8] bg-[#0E0C14]/90 text-white shadow-[0_0_24px_rgba(56,189,248,0.45)] hover:scale-105 active:scale-95"
                   : "border-[#2A2636] bg-[#0B0A0E]/85 text-[#6E6A7C] cursor-not-allowed"
@@ -5176,125 +5579,212 @@ export default function SurvivorGame() {
 
           {/* ==================== LEVEL-UP DRAFT MODAL ==================== */}
           {levelUpChoices && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-              <div className="w-full max-w-3xl rounded-2xl border border-[#D4AF37]/60 bg-[#15131B] p-6 shadow-2xl">
+            <div className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-black/80 p-3 sm:p-4 backdrop-blur-sm">
+              <div className="max-h-[94dvh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#D4AF37]/60 bg-[#15131B] p-4 sm:p-6 shadow-2xl">
                 <div className="text-center">
                   <span className="rounded-full bg-[#D4AF37]/20 px-3 py-1 font-mono text-xs font-bold text-[#F3C65F]">
                     ASCENSION • LEVEL {hud.level}
                   </span>
-                  <h2 className="mt-2 font-serif text-2xl font-black uppercase tracking-wider text-white sm:text-3xl">
-                    Choose Your Relic Blessing
+                  <h2 className="mt-2 font-serif text-xl font-black uppercase tracking-wider text-white sm:text-3xl">
+                    {draftMeta.banishMode
+                      ? "🚫 Select a Relic to Banish from This Run"
+                      : "Choose Your Relic Blessing"}
                   </h2>
                   <p className="mt-1 text-xs text-[#A39E93]">
-                    Click a card or press <strong className="text-white">1, 2, or 3</strong> on your keyboard
+                    {draftMeta.banishMode ? (
+                      <span className="font-semibold text-[#FCA5A5]">
+                        Click any Weapon or Passive card below to permanently block it from appearing again this run
+                      </span>
+                    ) : (
+                      <>
+                        Click a card or press <strong className="text-white">1, 2, 3</strong> •{" "}
+                        <strong className="text-[#38BDF8]">[R] Reroll</strong> •{" "}
+                        <strong className="text-[#FCA5A5]">[B] Banish</strong> •{" "}
+                        <strong className="text-[#4ADE80]">[S] Skip</strong>
+                      </>
+                    )}
                   </p>
                 </div>
 
-                <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  {levelUpChoices.map((card, idx) => (
-                    <button
-                      key={card.id}
-                      onClick={() => applyUpgradeChoice(card)}
-                      className={`group flex flex-col justify-between rounded-xl border p-4 text-left transition-all hover:-translate-y-1 ${
-                        card.isEvolution
-                          ? "border-[#EF4444] bg-gradient-to-b from-[#3B0A14] to-[#18090E] shadow-[0_0_25px_rgba(239,68,68,0.4)]"
-                          : "border-[#2A2636] bg-[#0E0C14] hover:border-[#F3C65F]"
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span
-                            className="rounded px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase"
-                            style={{
-                              backgroundColor: `${card.accentColor}25`,
-                              color: card.accentColor,
-                            }}
-                          >
-                            {card.isEvolution
-                              ? "★ RED-STAR EVO"
-                              : card.isNew
-                                ? "NEW RELIC"
-                                : `LV.${card.currentLevel} → LV.${card.nextLevel}`}
-                          </span>
-                          <span className="font-mono text-xs text-[#6E6A7C]">
-                            [{idx + 1}]
-                          </span>
-                        </div>
+                <div className="mt-5 grid grid-cols-1 gap-3.5 sm:mt-6 sm:grid-cols-3 sm:gap-4">
+                  {levelUpChoices.map((card, idx) => {
+                    const canBanishCard =
+                      !card.isEvolution &&
+                      (card.kind === "weapon" || card.kind === "passive") &&
+                      draftMeta.banishesLeft > 0;
 
-                        <div className="mt-3 flex items-center gap-3">
-                          {card.weaponId ? (
-                            <div
-                              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-[#15131B] p-1"
-                              style={{ borderColor: card.accentColor }}
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={
-                                  card.isEvolution
-                                    ? WEAPON_EVO_ICON_URLS[card.weaponId]
-                                    : WEAPON_ICON_URLS[card.weaponId]
-                                }
-                                alt={card.title}
-                                className="h-full w-full object-contain [image-rendering:pixelated]"
-                              />
-                            </div>
-                          ) : card.passiveId ? (
-                            <div
-                              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-[#15131B] p-1"
-                              style={{ borderColor: card.accentColor }}
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={PASSIVE_ICON_URLS[card.passiveId]}
-                                alt={card.title}
-                                className="h-full w-full object-contain [image-rendering:pixelated]"
-                              />
-                            </div>
-                          ) : card.consumableType ? (
-                            <div
-                              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-[#15131B] p-1"
-                              style={{ borderColor: card.accentColor }}
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={
-                                  card.consumableType === "heal"
-                                    ? PICKUP_ICON_URLS.meat
-                                    : PICKUP_ICON_URLS.gold
-                                }
-                                alt={card.title}
-                                className="h-full w-full object-contain [image-rendering:pixelated]"
-                              />
-                            </div>
-                          ) : null}
-                          <div>
-                            <h3 className="font-serif text-lg font-bold text-white group-hover:text-[#F3C65F]">
-                              {card.title}
-                            </h3>
-                            <div className="text-[11px] font-medium text-[#A39E93]">
-                              {card.subtitle}
-                            </div>
-                          </div>
-                        </div>
-
-                        <p className="mt-3 text-xs leading-relaxed text-[#EAE6DF]">
-                          {card.description}
-                        </p>
-                      </div>
-
-                      {card.synergyHint && (
-                        <div
-                          className={`mt-4 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${
-                            card.isEvolution
-                              ? "border-[#EF4444] bg-[#EF4444]/20 text-[#FCA5A5]"
-                              : "border-[#2A2636] bg-[#15131B] text-[#F3C65F]"
+                    return (
+                      <div key={card.id} className="relative flex flex-col">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (draftMeta.banishMode) {
+                              if (canBanishCard) {
+                                handleBanishCard(card);
+                              }
+                            } else {
+                              applyUpgradeChoice(card);
+                            }
+                          }}
+                          className={`group flex h-full w-full flex-col justify-between rounded-xl border p-4 text-left transition-all hover:-translate-y-1 ${
+                            draftMeta.banishMode && canBanishCard
+                              ? "border-[#EF4444] bg-[#240B12] ring-2 ring-[#EF4444]/50 hover:bg-[#320E18]"
+                              : card.isEvolution
+                                ? "border-[#EF4444] bg-gradient-to-b from-[#3B0A14] to-[#18090E] shadow-[0_0_25px_rgba(239,68,68,0.4)]"
+                                : "border-[#2A2636] bg-[#0E0C14] hover:border-[#F3C65F]"
                           }`}
                         >
-                          ✦ {card.synergyHint}
-                        </div>
-                      )}
-                    </button>
-                  ))}
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <span
+                                className="rounded px-2 py-0.5 font-mono text-[10px] font-extrabold uppercase"
+                                style={{
+                                  backgroundColor: `${card.accentColor}25`,
+                                  color: card.accentColor,
+                                }}
+                              >
+                                {card.isEvolution
+                                  ? "★ RED-STAR EVO"
+                                  : card.isNew
+                                    ? "NEW RELIC"
+                                    : `LV.${card.currentLevel} → LV.${card.nextLevel}`}
+                              </span>
+                              <span className="font-mono text-xs text-[#6E6A7C]">
+                                [{idx + 1}]
+                              </span>
+                            </div>
+
+                            <div className="mt-3 flex items-center gap-3">
+                              {card.weaponId ? (
+                                <div
+                                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-[#15131B] p-1"
+                                  style={{ borderColor: card.accentColor }}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={
+                                      card.isEvolution
+                                        ? WEAPON_EVO_ICON_URLS[card.weaponId]
+                                        : WEAPON_ICON_URLS[card.weaponId]
+                                    }
+                                    alt={card.title}
+                                    className="h-full w-full object-contain [image-rendering:pixelated]"
+                                  />
+                                </div>
+                              ) : card.passiveId ? (
+                                <div
+                                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-[#15131B] p-1"
+                                  style={{ borderColor: card.accentColor }}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={PASSIVE_ICON_URLS[card.passiveId]}
+                                    alt={card.title}
+                                    className="h-full w-full object-contain [image-rendering:pixelated]"
+                                  />
+                                </div>
+                              ) : card.consumableType ? (
+                                <div
+                                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-[#15131B] p-1"
+                                  style={{ borderColor: card.accentColor }}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={
+                                      card.consumableType === "heal"
+                                        ? PICKUP_ICON_URLS.meat
+                                        : PICKUP_ICON_URLS.gold
+                                    }
+                                    alt={card.title}
+                                    className="h-full w-full object-contain [image-rendering:pixelated]"
+                                  />
+                                </div>
+                              ) : null}
+                              <div>
+                                <h3 className="font-serif text-lg font-bold text-white group-hover:text-[#F3C65F]">
+                                  {card.title}
+                                </h3>
+                                <div className="text-[11px] font-medium text-[#A39E93]">
+                                  {card.subtitle}
+                                </div>
+                              </div>
+                            </div>
+
+                            <p className="mt-3 text-xs leading-relaxed text-[#EAE6DF]">
+                              {card.description}
+                            </p>
+                          </div>
+
+                          {card.synergyHint && (
+                            <div
+                              className={`mt-4 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${
+                                card.isEvolution
+                                  ? "border-[#EF4444] bg-[#EF4444]/20 text-[#FCA5A5]"
+                                  : "border-[#2A2636] bg-[#15131B] text-[#F3C65F]"
+                              }`}
+                            >
+                              ✦ {card.synergyHint}
+                            </div>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Tactical Draft Controls: Reroll, Banish, Skip */}
+                <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5 border-t border-[#2A2636] pt-4 sm:gap-3">
+                  <button
+                    type="button"
+                    onClick={handleRerollChoices}
+                    disabled={draftMeta.rerollsLeft <= 0}
+                    className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider transition-all ${
+                      draftMeta.rerollsLeft > 0
+                        ? "cursor-pointer border-[#38BDF8]/60 bg-[#0D1B2A] text-[#7DD3FC] shadow-[0_0_16px_rgba(56,189,248,0.2)] hover:border-[#38BDF8] hover:bg-[#13283F]"
+                        : "cursor-not-allowed border-[#242030] bg-[#0B0A0E] text-[#524E60]"
+                    }`}
+                  >
+                    <span>🎲 Reroll</span>
+                    <span className="rounded bg-black/40 px-1.5 py-0.5 text-[10px]">
+                      {draftMeta.rerollsLeft} Left [R]
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (draftMeta.banishesLeft > 0) {
+                        setDraftMeta((prev) => ({
+                          ...prev,
+                          banishMode: !prev.banishMode,
+                        }));
+                      }
+                    }}
+                    disabled={draftMeta.banishesLeft <= 0}
+                    className={`flex items-center gap-2 rounded-xl border px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider transition-all ${
+                      draftMeta.banishMode
+                        ? "cursor-pointer border-[#EF4444] bg-[#450A14] text-white shadow-[0_0_18px_rgba(239,68,68,0.45)]"
+                        : draftMeta.banishesLeft > 0
+                          ? "cursor-pointer border-[#EF4444]/55 bg-[#220B12] text-[#FCA5A5] hover:border-[#EF4444] hover:bg-[#310E19]"
+                          : "cursor-not-allowed border-[#242030] bg-[#0B0A0E] text-[#524E60]"
+                    }`}
+                  >
+                    <span>{draftMeta.banishMode ? "✕ Cancel Banish" : "🚫 Banish Relic"}</span>
+                    <span className="rounded bg-black/40 px-1.5 py-0.5 text-[10px]">
+                      {draftMeta.banishesLeft} Left [B]
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSkipLevelUp}
+                    className="flex cursor-pointer items-center gap-2 rounded-xl border border-[#4ADE80]/50 bg-[#0B1F17] px-4 py-2.5 font-mono text-xs font-bold uppercase tracking-wider text-[#86EFAC] transition-all hover:border-[#4ADE80] hover:bg-[#112E22]"
+                  >
+                    <span>⏭️ Skip Draft</span>
+                    <span className="rounded bg-black/40 px-1.5 py-0.5 text-[10px] text-[#FDE047]">
+                      +15G &amp; +20% HP [S]
+                    </span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -5304,8 +5794,13 @@ export default function SurvivorGame() {
           {chestReward && (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm">
               <div className="w-full max-w-md rounded-2xl border-2 border-[#FBBF24] bg-[#15131B] p-6 text-center shadow-[0_0_45px_rgba(251,191,36,0.35)]">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border-2 border-[#FDE047] bg-[#92400E] text-3xl shadow-inner">
-                  🎁
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl border-2 border-[#FDE047] bg-[#1C1410] p-1.5 shadow-[0_0_24px_rgba(251,191,36,0.35)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={PICKUP_ICON_URLS.chest}
+                    alt="Champion War Chest"
+                    className="h-full w-full object-contain [image-rendering:pixelated]"
+                  />
                 </div>
                 <h2 className="mt-3 font-serif text-2xl font-black uppercase tracking-wider text-[#F3C65F]">
                   Champion War Chest
@@ -5534,12 +6029,14 @@ export default function SurvivorGame() {
                   )}
 
                   <div className="flex gap-3">
-                    <button
-                      onClick={() => startNewRun(saveData.selectedCharacter)}
-                      className="flex-1 rounded-xl bg-[#D4AF37] py-3 font-serif text-sm font-black uppercase text-[#0B0A0E] hover:brightness-110"
-                    >
-                      Play Again
-                    </button>
+                    {endModal.outcome !== "victory" && (
+                      <button
+                        onClick={() => startNewRun(saveData.selectedCharacter)}
+                        className="flex-1 rounded-xl bg-[#D4AF37] py-3 font-serif text-sm font-black uppercase text-[#0B0A0E] hover:brightness-110"
+                      >
+                        Play Again
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setEndModal(null);
